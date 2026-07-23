@@ -1,0 +1,229 @@
+---
+description: Vue 3、TypeScript、Pinia setup store、样式、注释与工具函数的前端规范（由 frontend-code-standards skill 合并为 Rule）
+globs: src/**/*.{vue,ts,tsx,scss,css}
+alwaysApply: false
+---
+
+# 前端代码规范（Frontend Code Standards）
+
+本规则由 `.cursor/skills/frontend-code-standards` 各 reference 与原 `vue3-sfc-rule.mdc` 合并而来；维护 Skill 时请以 `references/` 下分文件为准，本 Rule 与之对齐。
+
+**应用方式**：按正在编辑的文件类型，只落实对应章节；审查时区分 **必须修复** / **建议优化**，并给出可落地改写示例。
+
+---
+
+## 1. Vue 单文件组件（SFC）
+
+适用范围：Vue 单文件组件（`*.vue`）。本节由原 `vue3-sfc-rule.mdc` 与 skill `references/vue3-sfc.md` 对齐合并。
+
+### 1.1 结构顺序
+
+```vue
+<template>
+  <!-- 结构与语义 -->
+</template>
+
+<script setup lang="ts">
+// 逻辑与状态
+</script>
+
+<style scoped lang="scss">
+/* 样式：lang 与项目一致，如 scss / less / stylus */
+</style>
+```
+
+- 固定顺序：`template` → `script setup lang="ts"` → `style scoped`。
+- `style` 必须按项目约定设置 `lang`（如 `scss` / `less` / `stylus`）。
+- 单文件单职责：页面容器与业务组件分层，避免请求、状态、渲染堆在同一组件。
+- 模板只放声明式结构，不写复杂业务判断。
+
+### 1.2 template
+
+- 复杂判断放到 `computed` 或方法中，不写超长三元表达式。
+- `v-for` 必须稳定 `:key`，禁止长期用 `index` 作为 key。
+- 事件处理避免内联复杂逻辑，使用命名方法。
+- 可访问性优先：交互元素使用语义标签与必要属性。
+
+### 1.3 script setup
+
+#### 导入与逻辑分层顺序
+
+脚本顺序固定为：`import` → `type/interface` → `store` → `props` → `emit`。
+
+可按功能使用 `// #region xxx` 分块；每个分块内顺序：`ref` → `computed` → 常量 → 生命周期 → 方法。
+
+#### 命名
+
+- 组件文件名、组件名：PascalCase，例如 `UserProfileCard.vue`。
+- 组件内类型名、store 名、方法名语义化，避免缩写与无语义命名。
+
+#### Props
+
+- Props 必须显式类型定义，并带注释说明。
+- 可选参数若无特殊说明，必须提供默认值。
+
+#### Emit
+
+- `defineEmits` 显式声明事件与参数类型。
+- 触发事件的方法需 `/** ... */`，含参数说明与返回值说明。
+
+#### 示例（Props / Emits 显式类型）
+
+```ts
+import { computed, onMounted, ref } from 'vue';
+import { useUserStore } from '@/stores/user';
+
+interface Props {
+  /** 用户 id */
+  id: string;
+  /** 是否禁用，无特殊说明时默认 false */
+  disabled?: boolean;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  disabled: false,
+});
+
+const emit = defineEmits<{
+  change: [value: string];
+}>();
+
+const userStore = useUserStore();
+
+// #region basic
+const count = ref(0);
+const doubleCount = computed(() => count.value * 2);
+const STEP = 1;
+
+onMounted(() => {
+  userStore.loadById(props.id);
+});
+
+/**
+ * 增加计数并通知上层。
+ * @param step 增长步长。
+ * @returns void
+ */
+function increase(step = STEP): void {
+  count.value += step;
+  emit('change', String(count.value));
+}
+// #endregion
+```
+
+#### 其他
+
+- 组合式逻辑优先抽为 composable，避免组件内部过度膨胀。
+- `watch` 仅用于副作用，不替代 `computed`。
+- 异步逻辑统一处理 loading/error，避免 silent failure。
+
+### 1.4 SFC 内 `<style>`（组件级）
+
+- `scoped` 为默认策略；跨组件样式通过全局 tokens / utilities 提供。
+- 组件样式只关注当前组件，不污染全局。
+- 类名 BEM：`.block__element--modifier`。
+- 使用 CSS 扩展语言（SCSS/Less 等）时优先嵌套语法。
+- 相同样式优先抽取变量、mixin 或公共类复用，避免重复声明。
+
+（全局样式文件、设计 token、≥3 处复用等另见 **第 5 节**。）
+
+---
+
+## 2. 注释
+
+适用范围：公共/导出函数、工具函数、store action、复杂业务函数。
+
+- 上述场景使用 `/** ... */`，含 `@param`；非 `void` 写 `@returns`。
+- 说明「为什么 / 约束」，不重复代码字面意；复杂分支可极简行内注释。
+
+示例：
+
+```ts
+/**
+ * 根据时间轴片段计算总时长（毫秒）。
+ * @param segments 时间轴片段列表，要求 start <= end。
+ * @param fps 帧率，用于对齐关键帧。
+ * @returns 归一化后的总时长（毫秒）。
+ */
+export function calcTimelineDuration(
+  segments: Array<{ start: number; end: number }>,
+  fps: number,
+): number {
+  return 0;
+}
+```
+
+---
+
+## 3. Pinia Setup Store
+
+适用范围：`stores/*`，`defineStore('name', () => {})`。
+
+- state / getters(getters 式 computed) / actions 分组清晰。
+- 异步 action 必须有错误处理与状态反馈（如 `loading` / `error`）。
+- 外部不直接改内部状态，优先经 action。
+
+公开方法使用 `/** ... */`（`@param` / `@returns`）。
+
+---
+
+## 4. TypeScript
+
+适用范围：`.ts`、`<script setup lang="ts">`、composables、stores、utils。
+
+- 少用 `any`；对外 API 显式类型；外部输入用 `unknown` 再收窄。
+- 空值策略统一（`null` / `undefined` 勿混用）。
+- 枚举风格：`const XX = {} as const` + 联合字面量类型。
+- 内部函数优先 `const fn = () => {}`；高频场景可减少重复创建。
+- 公共类型放共享目录，声明文件用 `.d.ts`。
+
+**命名**：函数 camelCase；常量 `UPPER_SNAKE_CASE`；类型/类 PascalCase。
+
+**注释**：`export` 常量、`interface`/`type` 关键字段、枚举对象与项均用 `/** ... */` 说明语义。
+
+---
+
+## 5. 样式（CSS / SCSS / 组件样式）
+
+- BEM；状态类 `.is-active`、`.is-disabled`；禁止无语义类名如 `.red`。
+- 嵌套不超过 3 层；避免过高权重选择器链。
+- 全局 tokens（颜色、间距、圆角等）；同一视觉 ≥3 处重复须抽公共类或 mixin。
+- 新增前先检索 tokens / mixin / 公共类是否可复用。
+
+---
+
+## 6. 工具函数（utils / lib）
+
+- 单一职责，命名体现语义；纯函数优先。
+- 入参/出参显式类型；处理空数组、NaN、越界等边界。
+- 默认可测试：不内联操作 DOM/全局状态（副作用工具除外）。
+
+示例：
+
+```ts
+/**
+ * 将毫秒格式化为 mm:ss。
+ * @param ms 毫秒数，非法值按 0 处理。
+ * @returns 格式化后的时间字符串。
+ */
+export function formatMs(ms: number): string {
+  const safe = Number.isFinite(ms) && ms > 0 ? Math.floor(ms) : 0;
+  const totalSeconds = Math.floor(safe / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+```
+
+---
+
+## 7. 代码格式化
+
+**每次写完代码后必须运行格式化，再提交或交付。**
+
+- 项目使用 Prettier（配置见 `.prettierrc`）；运行命令：`pnpm format` 或保存时自动格式化（需 IDE 配置 format on save）。
+- 格式化范围：本次改动涉及的所有文件（`*.vue`、`*.ts`、`*.scss`）。
+- AI 辅助写完代码后，同样须触发格式化，不得跳过。
+- **必须修复**：缩进不一致、引号混用、行尾空格、对象/数组尾逗号缺失等 Prettier 管辖问题。
+- **不属于格式化问题**：注释内容、逻辑结构、命名——这些由其他章节约束。
+

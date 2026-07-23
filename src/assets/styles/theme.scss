@@ -1,0 +1,28 @@
+/**
+ * 主题基调：把 tokens 应用到全局。
+ * 默认深色（黑/紫）。light 主题以后可在此文件按 [data-theme='light'] 扩展。
+ */
+body {
+  // 无边框透明窗口：body 透明，圆角背景由 .app-layout 承载
+  background: transparent;
+  color: var(--tb-text-primary);
+}
+
+/* 自定义滚动条，贴合深色主题 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--tb-border-strong);
+  border-radius: var(--tb-radius-sm);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--tb-color-primary);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

@@ -1,0 +1,8 @@
+/**
+ * 自定义全局样式入口（SCSS）。
+ * Tailwind 入口独立在 tailwind.css，由 main.ts 分别引入，避免 Sass 处理 Tailwind 指令。
+ * 引入 reset、设计 tokens、主题。
+ */
+@use './reset.scss';
+@use './tokens.scss';
+@use './theme.scss';

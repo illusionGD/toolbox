@@ -1,0 +1,42 @@
+/**
+ * 设计 tokens：黑/紫深色主题。
+ * - 主色相关变量（--tb-color-primary*）由 useTheme composable 运行时注入，
+ *   这里给出默认值兜底；
+ * - 背景/文本/边框等中性色为深色主题的固定基调。
+ * 结构预留 light 主题以后可在 [data-theme='light'] 下覆盖。
+ */
+:root {
+  /* 主色（运行时可被 JS 覆盖，此处为兜底默认） */
+  --tb-color-primary: #7c3aed;
+  --tb-color-primary-hover: #8f57f0;
+  --tb-color-primary-pressed: #6d33d1;
+  --tb-color-primary-soft: rgba(124, 58, 237, 0.16);
+
+  /* 背景层级：中性黑/灰（不带色相），紫色仅用于强调元素 */
+  --tb-bg-base: #161619;
+  --tb-bg-surface: #1d1d21;
+  --tb-bg-elevated: #26262b;
+  --tb-bg-hover: #2c2c33;
+
+  /* 文本层级：中性灰白 */
+  --tb-text-primary: #e6e6e9;
+  --tb-text-secondary: #9b9ba4;
+  --tb-text-disabled: #63636c;
+
+  /* 边框与分割线：中性灰 */
+  --tb-border: #2a2a30;
+  --tb-border-strong: #3a3a42;
+
+  /* 圆角 */
+  --tb-radius-sm: 6px;
+  --tb-radius-md: 8px;
+  --tb-radius-lg: 12px;
+  --tb-radius-window: 10px;
+
+  /* 间距基准 */
+  --tb-space-1: 4px;
+  --tb-space-2: 8px;
+  --tb-space-3: 12px;
+  --tb-space-4: 16px;
+  --tb-space-5: 24px;
+}
