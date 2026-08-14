@@ -51,8 +51,8 @@ export interface DonutSegment {
 interface Props {
   /** 分段数据。 */
   segments: DonutSegment[];
-  /** 中心显示的总数。 */
-  total: number;
+  /** 中心显示的总量（数值或已格式化的文本，如 `1.2 GB`）。 */
+  total: number | string;
   /** 中心单位文字，默认「次」。 */
   unit?: string;
   /** 画布尺寸（正方形边长 px），默认 140。 */

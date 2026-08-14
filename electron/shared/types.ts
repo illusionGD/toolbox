@@ -48,10 +48,136 @@ export interface PickedFile {
   size: number;
   /** 扩展名（小写，不含点），无扩展名为空串。 */
   ext: string;
+  /** 最后修改时间（毫秒时间戳）；读取失败为 0。 */
+  mtime: number;
 }
 
-/** 图片输出格式。'original' 表示保持原格式。 */
-export type ImageOutputFormat = 'original' | 'jpeg' | 'png' | 'webp' | 'avif';
+/**
+ * 图片输出格式。'original' 表示保持原格式。
+ * 仅列 sharp 当前构建**可编码**的格式（jp2/jxl/heic-hevc 编码器未编入 libvips，故不提供）。
+ */
+export type ImageOutputFormat = 'original' | 'jpeg' | 'png' | 'webp' | 'avif' | 'gif' | 'tiff';
+
+/** 目录扫描选项。 */
+export interface ScanOptions {
+  /** 本次扫描的唯一 id，用于取消与进度关联。 */
+  scanId: string;
+  /** 待扫描的根目录绝对路径。 */
+  root: string;
+  /** 是否包含隐藏文件/目录（以 . 开头），默认 true。 */
+  includeHidden: boolean;
+  /** 是否跳过常见忽略目录（node_modules/.git 等）。 */
+  skipIgnoredDirs: boolean;
+  /** 需跳过的目录名列表（仅 skipIgnoredDirs 为 true 时生效）。 */
+  ignoreDirs: string[];
+  /** 最多扫描的文件数，超出即截断；缺省用主进程默认值。 */
+  maxFiles?: number;
+  /** 最大递归深度，1 = 只取根目录当前层；缺省不限制。 */
+  maxDepth?: number;
+}
+
+/**
+ * 扫描到的单个文件。
+ * 目录路径经 dirIndex 指向 ScanResult.dirs，避免十万级条目重复存储长路径。
+ */
+export interface ScanFileEntry {
+  /** 文件名（含扩展名）。 */
+  name: string;
+  /** 所在目录在 ScanResult.dirs 中的下标。 */
+  dirIndex: number;
+  /** 文件大小（字节）。 */
+  size: number;
+  /** 最后修改时间（毫秒时间戳）。 */
+  mtime: number;
+  /** 扩展名（小写，不含点）；无扩展名为空串。 */
+  ext: string;
+}
+
+/** 目录扫描结果。 */
+export interface ScanResult {
+  /** 扫描的根目录。 */
+  root: string;
+  /** 去重后的目录路径表，供 ScanFileEntry.dirIndex 引用。 */
+  dirs: string[];
+  /** 扫描到的全部文件。 */
+  files: ScanFileEntry[];
+  /** 遍历到的目录数量（不含根目录）。 */
+  dirCount: number;
+  /** 耗时（毫秒）。 */
+  elapsed: number;
+  /** 是否因达到 maxFiles 上限而截断。 */
+  truncated: boolean;
+  /** 是否被用户取消（结果为部分数据）。 */
+  canceled: boolean;
+  /** 读取失败的目录描述（权限不足等），不影响整体成功。 */
+  errors: string[];
+}
+
+/** 扫描进度事件负载。 */
+export interface ScanProgress {
+  /** 对应的扫描 id。 */
+  scanId: string;
+  /** 已扫描到的文件数。 */
+  scanned: number;
+  /** 当前正在读取的目录。 */
+  currentDir: string;
+}
+
+/** 保存文本文件的选项。 */
+export interface SaveTextOptions {
+  /** 保存对话框中的默认文件名（含扩展名）。 */
+  defaultName: string;
+  /** 文件内容。 */
+  content: string;
+  /** 文件类型过滤。 */
+  filters?: Array<{ name: string; extensions: string[] }>;
+  /** 是否写入 UTF-8 BOM（CSV 给 Excel 用时需要）。 */
+  bom?: boolean;
+}
+
+/** 一次重命名请求项。 */
+export interface RenamePair {
+  /** 源文件绝对路径。 */
+  path: string;
+  /** 新文件名（含扩展名，不含目录）。重命名不跨目录。 */
+  newName: string;
+}
+
+/**
+ * 被拦下或执行失败的一项。
+ * reason 已是可直接展示给用户的中文，渲染进程不必再翻译错误码。
+ */
+export interface RenameConflict {
+  /** 源文件绝对路径。 */
+  path: string;
+  /** 期望的新文件名。 */
+  newName: string;
+  /** 原因。 */
+  reason: string;
+}
+
+/** 成功改名的一项，反向即为撤销。 */
+export interface RenameDone {
+  /** 原绝对路径。 */
+  from: string;
+  /** 新绝对路径。 */
+  to: string;
+}
+
+/** 批量重命名结果。 */
+export interface RenameBatchResult {
+  /** 已成功改名的项；撤销时把 from/to 对调再调一次即可。 */
+  done: RenameDone[];
+  /**
+   * pre-flight 拦下的项。
+   * 非空时 done 必为空——校验不过就一个文件都不碰，不做「改一半再报错」。
+   */
+  conflicts: RenameConflict[];
+  /** 执行阶段逐项失败（权限、文件已被别的程序移走等），此时 done 为部分成功。 */
+  failures: RenameConflict[];
+  /** 是否走了两趟改名（批内存在循环/交换时才会）。 */
+  twoPhase: boolean;
+}
 
 /** JPEG 高级选项（对应 sharp jpeg 参数）。 */
 export interface JpegAdvanced {
@@ -89,19 +215,35 @@ export interface AvifAdvanced {
   effort: number;
 }
 
+/** GIF 高级选项（对应 sharp gif 参数）。 */
+export interface GifAdvanced {
+  /** 调色板颜色数 2-256，越少体积越小。 */
+  colours: number;
+  /** 抖动强度 0-1，缓解色带。 */
+  dither: number;
+}
+
+/** TIFF 高级选项（对应 sharp tiff 参数）。 */
+export interface TiffAdvanced {
+  /** 压缩算法。 */
+  compression: 'lzw' | 'deflate' | 'jpeg' | 'none';
+}
+
 /** 各格式高级选项集合。 */
 export interface FormatAdvanced {
   jpeg: JpegAdvanced;
   png: PngAdvanced;
   webp: WebpAdvanced;
   avif: AvifAdvanced;
+  gif: GifAdvanced;
+  tiff: TiffAdvanced;
 }
 
-/** 图片压缩选项。 */
+/** 图片压缩/转换选项。 */
 export interface CompressOptions {
   /** 输出格式。 */
   format: ImageOutputFormat;
-  /** 质量 1-100（png 用于映射压缩级别）。 */
+  /** 质量 1-100（png 用于映射压缩级别；gif/tiff 无质量概念，忽略）。 */
   quality: number;
   /** 最大宽度（px）；不限制则为 undefined。等比缩放，不放大。 */
   maxWidth?: number;
@@ -109,11 +251,16 @@ export interface CompressOptions {
   outputDir: string;
   /** 是否覆盖原文件（true 时忽略 outputDir，写回原路径）。 */
   overwrite: boolean;
+  /**
+   * 是否保留动图的全部帧（gif/webp 之间转换时有效）。
+   * 关闭或目标格式不支持多帧时只取首帧。
+   */
+  keepAnimation?: boolean;
   /** 各格式高级选项；未提供时用主进程默认。 */
   advanced?: Partial<FormatAdvanced>;
 }
 
-/** 单张图片压缩结果。 */
+/** 单张图片处理结果。 */
 export interface CompressResult {
   /** 源文件路径。 */
   sourcePath: string;
@@ -121,10 +268,14 @@ export interface CompressResult {
   outputPath: string;
   /** 原始大小（字节）。 */
   originalSize: number;
-  /** 压缩后大小（字节）。 */
+  /** 输出后大小（字节）。 */
   compressedSize: number;
-  /** 压缩率百分比 0-100（节省的比例）。 */
+  /** 体积变化百分比，正数为减小、负数为增大。 */
   ratio: number;
+  /** 实际输出格式（original 解析后的结果，或因目标格式不支持而回退的格式）。 */
+  outputFormat: Exclude<ImageOutputFormat, 'original'>;
+  /** 输出是否为多帧动图。 */
+  animated: boolean;
 }
 
 /** 图片基本尺寸信息。 */
@@ -135,4 +286,278 @@ export interface ImageMeta {
   height: number;
   /** 格式（如 jpeg/png/webp）。 */
   format: string;
+}
+
+/** 裁剪模式。auto 自动去边，manual 按指定矩形裁。 */
+export type CropMode = 'auto' | 'manual';
+
+/** 裁剪矩形（图片原始像素坐标，与 sharp Region 同形）。 */
+export interface CropRect {
+  /** 距左边缘偏移。 */
+  left: number;
+  /** 距上边缘偏移。 */
+  top: number;
+  /** 宽度。 */
+  width: number;
+  /** 高度。 */
+  height: number;
+}
+
+/** 自动裁剪（去边）选项，对应 sharp trim 参数。 */
+export interface AutoCropOptions {
+  /** 与背景色的允许差值，越大裁得越狠。sharp 默认 10。 */
+  threshold: number;
+  /** 裁剪后在内容四周保留的边距 px。 */
+  margin: number;
+  /** 线稿/矢量模式，对线条图判定更准。 */
+  lineArt: boolean;
+  /** 要去掉的背景色（如 '#ffffff'）；缺省用左上角像素色。 */
+  background?: string;
+}
+
+/** 统一输出画布尺寸（裁剪结果居中放入）。 */
+export interface CropCanvas {
+  /** 画布宽度 px。 */
+  width: number;
+  /** 画布高度 px。 */
+  height: number;
+}
+
+/** 图片裁剪选项。 */
+export interface CropOptions {
+  /** 裁剪模式。 */
+  mode: CropMode;
+  /** 自动模式参数。 */
+  auto: AutoCropOptions;
+  /** 手动模式的裁剪矩形；越界会被钳制进图片边界。 */
+  rect?: CropRect;
+  /** 统一输出尺寸；缺省则各图尺寸由裁剪结果决定。 */
+  canvas?: CropCanvas;
+  /** 输出格式。 */
+  format: ImageOutputFormat;
+  /** 质量 1-100（语义同压缩）。 */
+  quality: number;
+  /** 输出目录绝对路径。 */
+  outputDir: string;
+  /** 是否覆盖原文件（true 时忽略 outputDir）。 */
+  overwrite: boolean;
+}
+
+/** 自动裁剪包围盒探测结果（不写盘）。 */
+export interface CropProbe {
+  /** 原图宽度 px。 */
+  width: number;
+  /** 原图高度 px。 */
+  height: number;
+  /**
+   * 自动裁剪后的包围盒（原图坐标系）。
+   * 与原图等大表示无边可裁；探测失败为 null。
+   */
+  rect: CropRect | null;
+}
+
+/** 单张图片裁剪结果。 */
+export interface CropResult {
+  /** 源文件路径。 */
+  sourcePath: string;
+  /** 输出文件路径。 */
+  outputPath: string;
+  /** 原始大小（字节）。 */
+  originalSize: number;
+  /** 输出后大小（字节）。 */
+  croppedSize: number;
+  /** 原图宽度 px。 */
+  originalWidth: number;
+  /** 原图高度 px。 */
+  originalHeight: number;
+  /** 输出宽度 px。 */
+  width: number;
+  /** 输出高度 px。 */
+  height: number;
+  /** 实际输出格式。 */
+  outputFormat: Exclude<ImageOutputFormat, 'original'>;
+  /** 无可裁边缘（输出尺寸与原图一致），仅重编码。 */
+  skipped: boolean;
+}
+
+/**
+ * 风格化效果种类。
+ * 数组化后同时充当**固定执行顺序**（见主进程 EFFECT_ORDER）：
+ * 几何/邻域类在前、调色在后、二值化最后。
+ */
+export type StylizeEffect =
+  | 'mosaic'
+  | 'blur'
+  | 'median'
+  | 'sharpen'
+  | 'grayscale'
+  | 'sepia'
+  | 'tint'
+  | 'modulate'
+  | 'contrast'
+  | 'negate'
+  | 'threshold';
+
+/** 马赛克。 */
+export interface MosaicEffect {
+  enabled: boolean;
+  /** 块大小 px（2-64），越大越糊。 */
+  block: number;
+}
+
+/** 高斯模糊。 */
+export interface BlurEffect {
+  enabled: boolean;
+  /** 高斯 sigma（0.3-50）。 */
+  sigma: number;
+}
+
+/** 中值滤波（去噪 / 油画感）。 */
+export interface MedianEffect {
+  enabled: boolean;
+  /** 方形窗口边长，奇数 1-15。 */
+  size: number;
+}
+
+/** 锐化。 */
+export interface SharpenEffect {
+  enabled: boolean;
+  /** 锐化 sigma（0.3-10）。 */
+  sigma: number;
+}
+
+/**
+ * 灰度。
+ * 实现走 `modulate({saturation:0})` 而非 `grayscale()`：后者输出的 raw 只有 1 通道，
+ * alpha 会丢失，无法与其它效果串联（实测）。
+ */
+export interface GrayscaleEffect {
+  enabled: boolean;
+}
+
+/** 复古（sepia 色调矩阵）。 */
+export interface SepiaEffect {
+  enabled: boolean;
+}
+
+/** 色调叠加。 */
+export interface TintEffect {
+  enabled: boolean;
+  /** 叠加色（如 '#ff8800'）。 */
+  color: string;
+}
+
+/** 亮度 / 饱和度 / 色相。 */
+export interface ModulateEffect {
+  enabled: boolean;
+  /** 亮度乘数（0.5-2，1 为原样）。 */
+  brightness: number;
+  /** 饱和度乘数（0-3，1 为原样）。 */
+  saturation: number;
+  /** 色相旋转角度（-180-180）。 */
+  hue: number;
+}
+
+/**
+ * 对比度。
+ * 走 `linear(a, b)`，其中 `b = 128 * (1 - a)`，即绕中灰旋转；
+ * 只给乘数不给偏移会让「调对比度」连带整体变亮/变暗。
+ */
+export interface ContrastEffect {
+  enabled: boolean;
+  /** 对比度系数（0.2-3，1 为原样）。 */
+  amount: number;
+}
+
+/**
+ * 反色。
+ * 实现固定 `{alpha:false}`：sharp 的 `negate()` 默认会把 alpha 通道一起反转，
+ * 导致整张图透明度颠倒（实测）。
+ */
+export interface NegateEffect {
+  enabled: boolean;
+}
+
+/** 阈值二值化。 */
+export interface ThresholdEffect {
+  enabled: boolean;
+  /** 阈值 0-255。 */
+  value: number;
+  /** 先转灰度再二值化（关闭则各通道独立二值化，出彩色块）。 */
+  grayscale: boolean;
+}
+
+/** 全局效果集合；缺省的 key 视为未启用。 */
+export interface StylizeEffects {
+  mosaic?: MosaicEffect;
+  blur?: BlurEffect;
+  median?: MedianEffect;
+  sharpen?: SharpenEffect;
+  grayscale?: GrayscaleEffect;
+  sepia?: SepiaEffect;
+  tint?: TintEffect;
+  modulate?: ModulateEffect;
+  contrast?: ContrastEffect;
+  negate?: NegateEffect;
+  threshold?: ThresholdEffect;
+}
+
+/** 局部区域效果（独立于全局效果的一组参数）。 */
+export interface RegionEffect {
+  /** 局部用哪种效果。 */
+  kind: 'mosaic' | 'blur';
+  /** 强度：mosaic 为块大小 px、blur 为 sigma。 */
+  strength: number;
+  /** true = 效果作用于区域**外**（背景虚化）。 */
+  invert: boolean;
+}
+
+/** 风格化选项。 */
+export interface StylizeOptions {
+  /** 全局效果集合。 */
+  effects: StylizeEffects;
+  /** 局部区域（图片原始像素坐标，复用 CropRect）；空数组表示无局部处理。 */
+  regions: CropRect[];
+  /** 局部区域的效果参数。 */
+  region: RegionEffect;
+  /** 输出格式。 */
+  format: ImageOutputFormat;
+  /** 质量 1-100（语义同压缩）。 */
+  quality: number;
+  /** 输出目录绝对路径。 */
+  outputDir: string;
+  /** 是否覆盖原文件（true 时忽略 outputDir）。 */
+  overwrite: boolean;
+}
+
+/** 风格化预览选项：与 StylizeOptions 同构，但不写盘、按 maxSize 缩放。 */
+export interface StylizePreviewOptions {
+  /** 全局效果集合。 */
+  effects: StylizeEffects;
+  /** 局部区域（原图坐标系，主进程按预览缩放比换算）。 */
+  regions: CropRect[];
+  /** 局部区域的效果参数。 */
+  region: RegionEffect;
+  /** 预览长边上限 px。 */
+  maxSize: number;
+}
+
+/** 单张图片风格化结果。 */
+export interface StylizeResult {
+  /** 源文件路径。 */
+  sourcePath: string;
+  /** 输出文件路径。 */
+  outputPath: string;
+  /** 原始大小（字节）。 */
+  originalSize: number;
+  /** 输出后大小（字节）。 */
+  stylizedSize: number;
+  /** 输出宽度 px。 */
+  width: number;
+  /** 输出高度 px。 */
+  height: number;
+  /** 实际输出格式。 */
+  outputFormat: Exclude<ImageOutputFormat, 'original'>;
+  /** 实际施加的效果趟数（0 = 未启用任何效果，仅重编码）。 */
+  appliedCount: number;
 }

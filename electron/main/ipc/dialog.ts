@@ -15,9 +15,9 @@ async function toPickedFile(filePath: string): Promise<PickedFile> {
   const ext = extname(filePath).replace(/^\./, '').toLowerCase();
   try {
     const info = await stat(filePath);
-    return { path: filePath, name, size: info.size, ext };
+    return { path: filePath, name, size: info.size, ext, mtime: info.mtimeMs };
   } catch {
-    return { path: filePath, name, size: 0, ext };
+    return { path: filePath, name, size: 0, ext, mtime: 0 };
   }
 }
 

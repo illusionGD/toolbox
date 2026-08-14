@@ -30,7 +30,8 @@ function toPickedFile(file: File): PickedFile {
   const path = window.api.getPathForFile(file);
   const dotIndex = file.name.lastIndexOf('.');
   const ext = dotIndex > -1 ? file.name.slice(dotIndex + 1).toLowerCase() : '';
-  return { path, name: file.name, size: file.size, ext };
+  // File.lastModified 已经是修改时间，无需再走一趟 IPC 去 stat
+  return { path, name: file.name, size: file.size, ext, mtime: file.lastModified };
 }
 
 /**

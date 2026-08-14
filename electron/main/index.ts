@@ -3,6 +3,7 @@ import { join } from 'path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { registerWindowControlIpc } from './ipc/window';
 import { registerDialogIpc } from './ipc/dialog';
+import { registerFileIpc } from './ipc/file';
 import { registerImageIpc } from './ipc/image';
 import { APP_CHANNELS } from '../shared/channels';
 
@@ -34,6 +35,7 @@ function createWindow(): void {
 
   registerWindowControlIpc(mainWindow);
   registerDialogIpc(mainWindow);
+  registerFileIpc(mainWindow);
   registerImageIpc();
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

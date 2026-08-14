@@ -1,68 +1,70 @@
 {
-    "name": "toolbox",
-    "version": "0.0.1",
-    "description": "多功能工具箱桌面应用",
-    "main": "./out/main/index.js",
-    "author": "tanjinde",
-    "private": true,
-    "pnpm": {
-        "onlyBuiltDependencies": [
-            "electron",
-            "esbuild"
-        ]
-    },
-    "scripts": {
-        "dev": "electron-vite dev",
-        "build": "electron-vite build",
-        "preview": "electron-vite preview",
-        "start": "electron-vite preview",
-        "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
-        "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
-        "typecheck": "npm run typecheck:node && npm run typecheck:web",
-        "lint": "eslint . --fix",
-        "format": "prettier --write .",
-        "commit": "git add . && git-cz",
-        "push": "npm run commit && git push --follow-tags"
-    },
-    "config": {
-        "commitizen": {
-            "path": "cz-conventional-changelog"
-        }
-    },
-    "dependencies": {
-        "@electron-toolkit/preload": "^3.0.2",
-        "@electron-toolkit/utils": "^4.0.0",
-        "@vicons/ionicons5": "^0.13.0",
-        "naive-ui": "^2.44.1",
-        "pinia": "^4.0.2",
-        "sharp": "^0.35.3",
-        "vue-router": "^5.2.0"
-    },
-    "devDependencies": {
-        "@electron-toolkit/tsconfig": "^1.0.1",
-        "@tailwindcss/postcss": "^4.3.3",
-        "@types/node": "^22.10.0",
-        "@vitejs/plugin-vue": "^5.2.1",
-        "@vue/eslint-config-prettier": "^10.2.0",
-        "@vue/eslint-config-typescript": "^14.9.0",
-        "autoprefixer": "^10.5.4",
-        "commitizen": "^4.3.2",
-        "cz-conventional-changelog": "^3.3.0",
-        "electron": "^33.2.1",
-        "electron-vite": "^2.3.0",
-        "eslint": "^10.7.0",
-        "eslint-config-prettier": "^10.1.8",
-        "eslint-plugin-vue": "^10.9.2",
-        "globals": "^17.7.0",
-        "postcss": "^8.5.19",
-        "prettier": "^3.9.5",
-        "sass-embedded": "^1.100.0",
-        "tailwindcss": "^4.3.3",
-        "typescript": "^5.7.2",
-        "typescript-eslint": "^8.64.0",
-        "vite": "^5.4.11",
-        "vue": "^3.5.13",
-        "vue-eslint-parser": "^10.4.1",
-        "vue-tsc": "^2.1.10"
+  "name": "toolbox",
+  "version": "0.0.1",
+  "description": "多功能工具箱桌面应用",
+  "main": "./out/main/index.js",
+  "author": "tanjinde",
+  "private": true,
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "start": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "lint": "eslint . --fix",
+    "format": "prettier --write .",
+    "commit": "git add . && git-cz",
+    "push": "npm run commit && git push --follow-tags"
+  },
+  "config": {
+    "commitizen": {
+      "path": "cz-conventional-changelog"
     }
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@esotericsoftware/spine-pixi-v8": "~4.2.119",
+    "@vicons/ionicons5": "^0.13.0",
+    "naive-ui": "^2.44.1",
+    "pinia": "^4.0.2",
+    "pixi.js": "^8.19.0",
+    "sharp": "^0.35.3",
+    "vue-router": "^5.2.0"
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "^1.0.1",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^22.10.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/eslint-config-prettier": "^10.2.0",
+    "@vue/eslint-config-typescript": "^14.9.0",
+    "autoprefixer": "^10.5.4",
+    "commitizen": "^4.3.2",
+    "cz-conventional-changelog": "^3.3.0",
+    "electron": "^33.2.1",
+    "electron-vite": "^2.3.0",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.9.2",
+    "globals": "^17.7.0",
+    "postcss": "^8.5.19",
+    "prettier": "^3.9.5",
+    "sass-embedded": "^1.100.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.64.0",
+    "vite": "^5.4.11",
+    "vue": "^3.5.13",
+    "vue-eslint-parser": "^10.4.1",
+    "vue-tsc": "^2.1.10"
+  }
 }

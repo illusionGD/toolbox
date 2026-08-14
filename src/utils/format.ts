@@ -41,3 +41,15 @@ export function formatRelativeTime(timestamp: number, now: number = Date.now()):
   const dd = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
+
+/**
+ * 将时间戳格式化为 `yyyy-MM-dd HH:mm`。
+ * @param timestamp 目标时间戳（毫秒）。
+ * @returns 日期时间字符串；非法值返回 '—'。
+ */
+export function formatDateTime(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '—';
+  const d = new Date(timestamp);
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}

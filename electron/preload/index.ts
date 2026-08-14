@@ -1,12 +1,31 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { electronAPI } from '@electron-toolkit/preload';
-import { APP_CHANNELS, DIALOG_CHANNELS, IMAGE_CHANNELS, WINDOW_CHANNELS } from '../shared/channels';
+import {
+  APP_CHANNELS,
+  DIALOG_CHANNELS,
+  FILE_CHANNELS,
+  IMAGE_CHANNELS,
+  WINDOW_CHANNELS,
+} from '../shared/channels';
 import type {
+  AutoCropOptions,
   CompressOptions,
   CompressResult,
+  CropOptions,
+  CropProbe,
+  CropResult,
   IpcResponse,
   OpenFilesOptions,
   PickedFile,
+  RenameBatchResult,
+  RenamePair,
+  SaveTextOptions,
+  ScanOptions,
+  ScanProgress,
+  ScanResult,
+  StylizeOptions,
+  StylizePreviewOptions,
+  StylizeResult,
 } from '../shared/types';
 
 /** 暴露给渲染进程的自定义 API。 */
@@ -71,6 +90,55 @@ const api = {
    */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
 
+  /** 文件统计与文件系统操作。 */
+  file: {
+    /**
+     * 递归扫描目录，收集文件信息。
+     * @param options 扫描选项（含 scanId，用于取消与进度关联）。
+     * @returns 统一响应，data 为扫描结果。
+     */
+    scan: (options: ScanOptions): Promise<IpcResponse<ScanResult>> =>
+      ipcRenderer.invoke(FILE_CHANNELS.scan, options),
+    /**
+     * 取消进行中的扫描。
+     * @param scanId 扫描 id。
+     * @returns 统一响应，data 为是否找到并取消了对应扫描。
+     */
+    cancelScan: (scanId: string): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(FILE_CHANNELS.cancelScan, scanId),
+    /**
+     * 在系统资源管理器中定位文件。
+     * @param filePath 文件绝对路径。
+     * @returns 统一响应，data 为 void。
+     */
+    showInFolder: (filePath: string): Promise<IpcResponse<void>> =>
+      ipcRenderer.invoke(FILE_CHANNELS.showInFolder, filePath),
+    /**
+     * 弹出保存对话框并写入文本文件。
+     * @param options 保存选项。
+     * @returns 统一响应，data 为写入路径（取消为 null）。
+     */
+    saveText: (options: SaveTextOptions): Promise<IpcResponse<string | null>> =>
+      ipcRenderer.invoke(FILE_CHANNELS.saveText, options),
+    /**
+     * 批量重命名（主进程先做 pre-flight，冲突则整批不动）。
+     * @param pairs 源路径与新文件名的配对。
+     * @returns 统一响应，data 为执行结果（已改/冲突/失败）。
+     */
+    renameBatch: (pairs: RenamePair[]): Promise<IpcResponse<RenameBatchResult>> =>
+      ipcRenderer.invoke(FILE_CHANNELS.renameBatch, pairs),
+    /**
+     * 订阅扫描进度。
+     * @param callback 进度回调。
+     * @returns 取消订阅的函数。
+     */
+    onScanProgress: (callback: (progress: ScanProgress) => void): (() => void) => {
+      const listener = (_event: unknown, progress: ScanProgress): void => callback(progress);
+      ipcRenderer.on(FILE_CHANNELS.scanProgress, listener);
+      return () => ipcRenderer.off(FILE_CHANNELS.scanProgress, listener);
+    },
+  },
+
   /** 图片处理。 */
   image: {
     /**
@@ -98,6 +166,41 @@ const api = {
       options: CompressOptions,
     ): Promise<IpcResponse<CompressResult>> =>
       ipcRenderer.invoke(IMAGE_CHANNELS.compress, sourcePath, options),
+    /**
+     * 探测自动裁剪的包围盒（只算不写盘）。
+     * @param filePath 图片路径。
+     * @param auto 自动裁剪参数。
+     * @returns 统一响应，data 为原图尺寸与包围盒。
+     */
+    probeCrop: (filePath: string, auto: AutoCropOptions): Promise<IpcResponse<CropProbe>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.probeCrop, filePath, auto),
+    /**
+     * 裁剪单张图片。
+     * @param sourcePath 源文件路径。
+     * @param options 裁剪选项。
+     * @returns 统一响应，data 为裁剪结果。
+     */
+    crop: (sourcePath: string, options: CropOptions): Promise<IpcResponse<CropResult>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.crop, sourcePath, options),
+    /**
+     * 生成风格化预览（缩放后处理，不写盘）。
+     * @param filePath 图片路径。
+     * @param options 预览选项。
+     * @returns 统一响应，data 为预览 data URL。
+     */
+    stylizePreview: (
+      filePath: string,
+      options: StylizePreviewOptions,
+    ): Promise<IpcResponse<string>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.stylizePreview, filePath, options),
+    /**
+     * 风格化单张图片。
+     * @param sourcePath 源文件路径。
+     * @param options 风格化选项。
+     * @returns 统一响应，data 为处理结果。
+     */
+    stylize: (sourcePath: string, options: StylizeOptions): Promise<IpcResponse<StylizeResult>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.stylize, sourcePath, options),
   },
 };
 

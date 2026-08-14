@@ -10,10 +10,15 @@
           </div>
         </div>
         <div class="preview__col">
-          <p class="preview__label">压缩后</p>
+          <p class="preview__label">{{ resultLabel }}</p>
           <div class="preview__img-wrap">
-            <img v-if="compressedUrl" :src="compressedUrl" class="preview__img" alt="压缩后" />
-            <div v-else class="preview__placeholder">尚未压缩</div>
+            <img
+              v-if="compressedUrl"
+              :src="compressedUrl"
+              class="preview__img"
+              :alt="resultLabel"
+            />
+            <div v-else class="preview__placeholder">尚未处理</div>
           </div>
         </div>
       </div>
@@ -31,14 +36,17 @@ interface Props {
   title?: string;
   /** 原图 data URL。 */
   originalUrl?: string;
-  /** 压缩后 data URL；无则显示占位。 */
+  /** 处理后 data URL；无则显示占位。 */
   compressedUrl?: string;
+  /** 右侧一栏的标签，如「压缩后」「转换后」。 */
+  resultLabel?: string;
 }
 
 withDefaults(defineProps<Props>(), {
   title: '预览对比',
   originalUrl: '',
   compressedUrl: '',
+  resultLabel: '处理后',
 });
 
 const emit = defineEmits<{

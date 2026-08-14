@@ -23,8 +23,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: '图片工具',
     icon: ImageOutline,
     children: [
-      { key: 'image-compress', label: '图片压缩', path: '/image/compress' },
-      { key: 'image-convert', label: '格式转换', path: '/image/convert' },
+      { key: 'image-compress', label: '压缩 / 转换', path: '/image/compress' },
       { key: 'image-crop', label: '图片裁剪', path: '/image/crop' },
       { key: 'image-stylize', label: '风格化', path: '/image/stylize' },
       { key: 'image-sprite', label: '精灵图', path: '/image/sprite' },
@@ -35,6 +34,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: '文件工具',
     icon: FolderOpenOutline,
     children: [
+      { key: 'file-stats', label: '文件统计', path: '/file/stats' },
       { key: 'file-rename', label: '批量重命名', path: '/file/rename' },
       { key: 'file-word2pdf', label: 'Word 转 PDF', path: '/file/word2pdf' },
       { key: 'file-pdf2word', label: 'PDF 转 Word', path: '/file/pdf2word' },
@@ -57,6 +57,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     children: [
       { key: 'media-video', label: '视频工具', path: '/media/video' },
       { key: 'media-audio', label: '音频工具', path: '/media/audio' },
+      { key: 'media-spine', label: 'Spine 预览', path: '/media/spine' },
     ],
   },
   {

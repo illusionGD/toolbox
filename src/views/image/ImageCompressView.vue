@@ -1,7 +1,7 @@
 <template>
   <ToolPageLayout
-    title="图片压缩"
-    desc="批量压缩图片，减小文件体积，支持多种格式"
+    title="图片压缩 / 转换"
+    desc="批量压缩与格式转换，支持 JPG / PNG / WebP / AVIF / GIF / TIFF"
     category="图片工具"
   >
     <!-- 操作栏 -->
@@ -51,11 +51,14 @@
 
     <!-- 参数面板 -->
     <template #panel>
-      <h3 class="compress__panel-title">压缩设置</h3>
+      <h3 class="compress__panel-title">输出设置</h3>
 
       <div class="compress__field">
         <label class="compress__label">输出格式</label>
         <n-select v-model:value="config.format" :options="formatOptions" size="small" />
+        <p v-if="config.format === 'original'" class="compress__tip">
+          SVG / HEIC 等只读格式将输出为 PNG
+        </p>
       </div>
 
       <div class="compress__field">
@@ -71,7 +74,35 @@
 
       <div class="compress__field">
         <label class="compress__label">图片质量 {{ config.quality }}%</label>
-        <n-slider v-model:value="config.quality" :min="1" :max="100" :step="1" />
+        <n-slider
+          v-model:value="config.quality"
+          :min="1"
+          :max="100"
+          :step="1"
+          :disabled="!qualityEnabled"
+        />
+        <p v-if="!qualityEnabled" class="compress__tip">
+          {{
+            config.format === 'gif'
+              ? 'GIF 为调色板格式，体积由「颜色数」决定'
+              : 'TIFF 仅在 JPEG 压缩下使用质量参数'
+          }}
+        </p>
+      </div>
+
+      <!-- 动图保留：仅当列表里有 gif/webp 时才有意义 -->
+      <div v-if="hasAnimatable" class="compress__field compress__field--row">
+        <label class="compress__label">保留动画帧</label>
+        <n-tooltip :disabled="targetSupportsAnimation">
+          <template #trigger>
+            <n-switch
+              v-model:value="config.keepAnimation"
+              size="small"
+              :disabled="!targetSupportsAnimation"
+            />
+          </template>
+          目标格式不支持多帧，将只输出首帧
+        </n-tooltip>
       </div>
 
       <!-- 按格式展开的高级选项 -->
@@ -143,6 +174,30 @@
               <n-slider v-model:value="config.advanced.avif.effort" :min="0" :max="9" :step="1" />
             </div>
           </template>
+
+          <!-- GIF -->
+          <template v-else-if="activeAdvancedFormat === 'gif'">
+            <div class="compress__field">
+              <label class="compress__label">颜色数 {{ config.advanced.gif.colours }}</label>
+              <n-slider v-model:value="config.advanced.gif.colours" :min="2" :max="256" :step="1" />
+            </div>
+            <div class="compress__field">
+              <label class="compress__label">抖动 {{ config.advanced.gif.dither }}</label>
+              <n-slider v-model:value="config.advanced.gif.dither" :min="0" :max="1" :step="0.1" />
+            </div>
+          </template>
+
+          <!-- TIFF -->
+          <template v-else-if="activeAdvancedFormat === 'tiff'">
+            <div class="compress__field">
+              <label class="compress__label">压缩算法</label>
+              <n-select
+                v-model:value="config.advanced.tiff.compression"
+                :options="tiffCompressionOptions"
+                size="small"
+              />
+            </div>
+          </template>
         </n-collapse-item>
       </n-collapse>
 
@@ -192,9 +247,9 @@
         <span>已选择 {{ items.length }} 个文件</span>
         <div class="compress__footer-stats">
           <span>原总大小 {{ formatBytes(totalOriginal) }}</span>
-          <span>压缩后 {{ formatBytes(totalCompressed) }}</span>
+          <span>处理后 {{ formatBytes(totalCompressed) }}</span>
           <span v-if="totalRatio !== null" class="compress__footer-ratio">
-            压缩率 {{ totalRatio }}%
+            {{ totalRatio < 0 ? `体积增大 ${-totalRatio}%` : `体积减小 ${totalRatio}%` }}
           </span>
         </div>
       </div>
@@ -206,6 +261,7 @@
     :title="previewTitle"
     :original-url="previewOriginal"
     :compressed-url="previewCompressed"
+    :result-label="previewResultLabel"
   />
 </template>
 
@@ -244,8 +300,8 @@ import { formatBytes } from '@/utils/format';
 // #region state
 const message = useMessage();
 
-/** 支持的图片扩展名。 */
-const ACCEPT = ['jpg', 'jpeg', 'png', 'webp', 'avif', 'gif', 'bmp', 'tiff'];
+/** 支持的图片扩展名（sharp 可解码的格式；bmp 需 magick，当前构建不支持）。 */
+const ACCEPT = ['jpg', 'jpeg', 'png', 'webp', 'avif', 'gif', 'tif', 'tiff', 'svg', 'heic', 'heif'];
 
 const items = ref<CompressItem[]>([]);
 const checkedKeys = ref<string[]>([]);
@@ -258,9 +314,11 @@ const DEFAULT_ADVANCED: FormatAdvanced = {
   png: { compressionLevel: 6, progressive: false, palette: false },
   webp: { lossless: false, effort: 4 },
   avif: { lossless: false, effort: 4 },
+  gif: { colours: 256, dither: 1 },
+  tiff: { compression: 'lzw' },
 };
 
-/** 持久化的压缩配置（记住上次使用）。 */
+/** 持久化的处理配置（记住上次使用）。 */
 const { config } = useToolConfig('image-compress', {
   format: 'original' as ImageOutputFormat,
   quality: 75,
@@ -269,6 +327,7 @@ const { config } = useToolConfig('image-compress', {
   maxWidthCustom: 1920,
   outputDir: '',
   overwrite: false,
+  keepAnimation: true,
   advanced: DEFAULT_ADVANCED,
 });
 
@@ -278,6 +337,8 @@ const formatOptions = [
   { label: 'PNG', value: 'png' },
   { label: 'WebP', value: 'webp' },
   { label: 'AVIF', value: 'avif' },
+  { label: 'GIF', value: 'gif' },
+  { label: 'TIFF', value: 'tiff' },
 ];
 
 const maxWidthOptions = [
@@ -292,11 +353,20 @@ const chromaOptions = [
   { label: '4:4:4（更清晰）', value: '4:4:4' },
 ];
 
+const tiffCompressionOptions = [
+  { label: 'LZW（无损）', value: 'lzw' },
+  { label: 'Deflate（无损，更小）', value: 'deflate' },
+  { label: 'JPEG（有损，看质量）', value: 'jpeg' },
+  { label: '不压缩', value: 'none' },
+];
+
 // 预览
 const previewShow = ref(false);
 const previewTitle = ref('');
 const previewOriginal = ref('');
 const previewCompressed = ref('');
+/** 预览右栏标题：同格式叫「压缩后」，跨格式叫「转换后」。 */
+const previewResultLabel = ref('处理后');
 // #endregion
 
 // #region drop
@@ -312,6 +382,21 @@ const activeAdvancedFormat = computed<Exclude<ImageOutputFormat, 'original'> | n
   config.format === 'original' ? null : config.format,
 );
 
+/** 质量滑块是否生效：gif 是调色板格式、tiff 仅 jpeg 压缩时看质量。 */
+const qualityEnabled = computed(() => {
+  if (config.format === 'gif') return false;
+  if (config.format === 'tiff') return config.advanced.tiff.compression === 'jpeg';
+  return true;
+});
+
+/** 列表中是否有动图（gif/webp 可能多帧），用于决定是否显示保留动画开关。 */
+const hasAnimatable = computed(() => items.value.some((i) => i.ext === 'gif' || i.ext === 'webp'));
+
+/** 目标格式是否支持多帧（avif 在当前 libvips 下编码后只剩 1 帧，不算）。 */
+const targetSupportsAnimation = computed(
+  () => config.format === 'original' || config.format === 'gif' || config.format === 'webp',
+);
+
 const totalOriginal = computed(() => items.value.reduce((s, i) => s + i.size, 0));
 const totalCompressed = computed(() =>
   items.value.reduce((s, i) => s + (i.compressedSize ?? 0), 0),
@@ -321,15 +406,16 @@ const totalRatio = computed(() => {
   if (!done.length) return null;
   const orig = done.reduce((s, i) => s + i.size, 0);
   const comp = done.reduce((s, i) => s + (i.compressedSize ?? 0), 0);
-  return orig > 0 ? Math.max(0, Math.round((1 - comp / orig) * 100)) : 0;
+  // 转格式时可能变大，负数如实展示
+  return orig > 0 ? Math.round((1 - comp / orig) * 100) : 0;
 });
 const canStart = computed(
   () => items.value.length > 0 && !processing.value && (config.overwrite || !!config.outputDir),
 );
 
-/** 开始按钮文案：有勾选时提示只压缩选中数量。 */
+/** 开始按钮文案：有勾选时提示只处理选中数量。 */
 const startLabel = computed(() =>
-  checkedKeys.value.length ? `压缩选中 (${checkedKeys.value.length})` : '开始压缩',
+  checkedKeys.value.length ? `开始处理 (${checkedKeys.value.length})` : '开始处理',
 );
 // #endregion
 
@@ -351,18 +437,37 @@ const columns: DataTableColumns<CompressItem> = [
           }),
   },
   { title: '文件名', key: 'name', ellipsis: { tooltip: true } },
+  {
+    title: '输出',
+    key: 'outputFormat',
+    width: 84,
+    render: (row) => {
+      if (!row.outputFormat) return '—';
+      const label = row.outputFormat === 'jpeg' ? 'JPG' : row.outputFormat.toUpperCase();
+      return row.animated ? `${label} · 动图` : label;
+    },
+  },
   { title: '原大小', key: 'size', width: 90, render: (row) => formatBytes(row.size) },
   {
-    title: '压缩后',
+    title: '处理后',
     key: 'compressedSize',
     width: 90,
     render: (row) => (row.compressedSize !== undefined ? formatBytes(row.compressedSize) : '—'),
   },
   {
-    title: '压缩率',
+    title: '体积变化',
     key: 'ratio',
-    width: 76,
-    render: (row) => (row.ratio !== undefined ? `${row.ratio}%` : '—'),
+    width: 88,
+    // 转格式可能让体积变大，用正负号与颜色区分，不再截断为 0
+    render: (row) => {
+      if (row.ratio === undefined) return '—';
+      const grew = row.ratio < 0;
+      return h(
+        'span',
+        { style: grew ? 'color:var(--tb-text-secondary)' : 'color:var(--tb-color-primary)' },
+        grew ? `+${-row.ratio}%` : `-${row.ratio}%`,
+      );
+    },
   },
   {
     title: '状态',
@@ -422,6 +527,7 @@ async function handleAddFiles(): Promise<void> {
   const files = await pickFilesApi({
     multiple: true,
     filters: [{ name: '图片', extensions: ACCEPT }],
+    title: '选择要处理的图片',
   });
   if (files.length) addFiles(files);
 }
@@ -463,11 +569,15 @@ async function handlePickOutputDir(): Promise<void> {
   if (dir) config.outputDir = dir;
 }
 
-/** 打开预览：加载原图 data URL；若已压缩则加载压缩后图。 */
+/** 打开预览：加载原图 data URL；若已处理则加载处理后的图。 */
 async function openPreview(row: CompressItem): Promise<void> {
   previewTitle.value = row.name;
   previewOriginal.value = '';
   previewCompressed.value = '';
+  // 输出扩展名与源不同即为转换，标签跟着变
+  const sourceFormat = row.ext === 'jpg' ? 'jpeg' : row.ext === 'tif' ? 'tiff' : row.ext;
+  previewResultLabel.value =
+    row.outputFormat && row.outputFormat !== sourceFormat ? '转换后' : '压缩后';
   previewShow.value = true;
   try {
     previewOriginal.value = await getDataUrlApi(row.path);
@@ -490,8 +600,8 @@ function resolveMaxWidth(): number | undefined {
 }
 
 /**
- * 组装传给主进程的压缩选项（含最大宽度与高级选项）。
- * @returns 压缩选项。
+ * 组装传给主进程的处理选项（含最大宽度与高级选项）。
+ * @returns 处理选项。
  */
 function buildCompressOptions(): CompressOptions {
   return {
@@ -500,13 +610,14 @@ function buildCompressOptions(): CompressOptions {
     maxWidth: resolveMaxWidth(),
     outputDir: config.outputDir,
     overwrite: config.overwrite,
+    keepAnimation: config.keepAnimation,
     // config 是 reactive Proxy，advanced 为嵌套响应式对象，
     // 直接经 IPC 传会报 "An object could not be cloned"，需转纯对象
     advanced: JSON.parse(JSON.stringify(config.advanced)) as FormatAdvanced,
   };
 }
 
-/** 开始压缩：有勾选时只处理选中项，否则处理全部。 */
+/** 开始处理：有勾选时只处理选中项，否则处理全部。 */
 async function handleStart(): Promise<void> {
   const options = buildCompressOptions();
   const selected = new Set(checkedKeys.value);
@@ -523,19 +634,21 @@ async function handleStart(): Promise<void> {
         item.compressedSize = result.compressedSize;
         item.ratio = result.ratio;
         item.outputPath = result.outputPath;
+        item.outputFormat = result.outputFormat;
+        item.animated = result.animated;
         item.status = 'done';
         ok += 1;
       } catch (e) {
         item.status = 'error';
-        item.error = e instanceof Error ? e.message : '压缩失败';
+        item.error = e instanceof Error ? e.message : '处理失败';
         lastError = item.error;
         failed += 1;
       }
     }
     if (failed === 0) {
-      message.success(`压缩完成，共 ${ok} 个`);
+      message.success(`处理完成，共 ${ok} 个`);
     } else if (ok === 0) {
-      message.error(`压缩失败：${lastError}`);
+      message.error(`处理失败：${lastError}`);
     } else {
       message.warning(`完成 ${ok} 个，失败 ${failed} 个（悬停状态查看原因）`);
     }
@@ -602,6 +715,13 @@ async function handleStart(): Promise<void> {
 
   &__field--row &__label {
     margin-bottom: 0;
+  }
+
+  &__tip {
+    margin: var(--tb-space-2) 0 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--tb-text-secondary);
   }
 
   &__dir {

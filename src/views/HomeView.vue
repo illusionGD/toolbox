@@ -87,6 +87,7 @@ import { computed, ref } from 'vue';
 import { NButton, NCard, NIcon, NTabPane, NTabs } from 'naive-ui';
 import { FlashOutline } from '@vicons/ionicons5';
 import { RECOMMEND_GROUPS } from '@/constants/recommend';
+import { colorAt } from '@/constants/chart';
 import { useUsageStore } from '@/stores/usage';
 import { useToolLauncher } from '@/composables/useToolLauncher';
 import { getTool } from '@/utils/navigation';
@@ -98,18 +99,6 @@ const usageStore = useUsageStore();
 const { openTool } = useToolLauncher();
 
 const activeTab = ref(RECOMMEND_GROUPS[0]?.key ?? 'recommend');
-
-/** 分类统计配色。 */
-const CATEGORY_COLORS = ['#7c3aed', '#2563eb', '#0891b2', '#16a34a', '#d97706', '#e11d48'];
-
-/**
- * 取第 i 个分类的配色（循环取用）。
- * @param i 序号。
- * @returns 颜色值。
- */
-function colorAt(i: number): string {
-  return CATEGORY_COLORS[i % CATEGORY_COLORS.length];
-}
 
 /** 最近使用列表（含展示名与相对时间）。 */
 const recentRows = computed(() =>
