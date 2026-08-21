@@ -90,7 +90,12 @@ libvips 8.18.3 是裁剪构建，文档列的格式不等于能用。实测结�
 - 压缩模式(快速/均衡/高质量)切换只是设默认 quality(60/75/90)，用户仍可微调滑块。
 - **配置持久化**：整个参数面板经 `useToolConfig('image-compress', defaults)` 记住上次使用（格式/质量/模式/最大宽度/输出目录/覆盖/各格式高级选项）。见 [[common-capabilities]]。
 - **按格式高级选项**：选非 original 格式时展开 n-collapse「高级设置」。类型见 shared/types 的 `FormatAdvanced`（jpeg: progressive/mozjpeg/chromaSubsampling；png: compressionLevel/progressive/palette；webp: lossless/effort；avif: lossless/effort；**gif: colours(2-256)/dither(0-1)；tiff: compression(lzw|deflate|jpeg|none)**）。主进程 `applyFormat` 消费；缺省用 sharp 默认。
-- 「添加文件夹」目前仅提示，递归扫描后续实现。
+- **「添加文件夹」+ 分页 + 懒加载缩略图是一套**，三条互相依赖，改一条要想到另两条：
+  - 导入走 `useFolderImport`（见 [[common-capabilities]]），扩展名过滤在主进程遍历时完成。工具栏「含子文件夹」复选框控制，默认关。
+  - 表格**受控分页**，每页 50 行（`PAGE_SIZE`）。分页器受控而非交给 n-data-table 自己管，是因为要知道「当前页是哪些行」才能只给它们加载缩略图。
+  - 缩略图**只为当前页加载**，经 `createTaskQueue(4)` 限并发，`thumbRequested` 记已入队的 id 防止翻回上一页重复请求。原先是在 `addFiles` 里逐项 `void getThumbnailApi()`——手挑十几个文件没问题，文件夹导入上千张就是上千个并发 sharp 解码，界面连滚动都卡住。
+  - 因此**表格不能开列排序**：分页切片按 `items` 顺序算，一旦表格内部按某列重排，切片与实际渲染的行就对不上，缩略图会加载到别的页去。要加排序得像 [[file-rename]] 那样做成受控排序、切片前先排。
+  - `handleClear` 要同时 `thumbQueue.clear()` + `thumbRequested.clear()`，否则清空后重新导入同名文件不会再取缩略图。
 - 压缩串行执行（稳、进度直观）；大批量若需提速可改并发池。
 - 覆盖原文件时忽略输出目录；未覆盖时必须先选输出目录才能开始（canStart 约束）。
 - 面包屑在 ToolPageLayout 里字号 12px（较小），gap 收紧。

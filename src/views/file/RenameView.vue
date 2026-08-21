@@ -6,7 +6,7 @@
   >
     <!-- 操作栏 -->
     <template #toolbar>
-      <n-space>
+      <n-space align="center">
         <n-button type="primary" :disabled="running" @click="handlePickFiles">
           <template #icon><n-icon :component="DocumentOutline" /></template>
           添加文件
@@ -15,6 +15,13 @@
           <template #icon><n-icon :component="FolderOpenOutline" /></template>
           添加文件夹
         </n-button>
+        <n-checkbox
+          v-model:checked="config.recursive"
+          :disabled="running"
+          class="rename__recursive"
+        >
+          含子文件夹
+        </n-checkbox>
         <n-button :disabled="!checkedKeys.length || running" @click="handleRemoveChecked">
           <template #icon><n-icon :component="RemoveCircleOutline" /></template>
           移除选中 ({{ checkedKeys.length }})
@@ -256,11 +263,6 @@
         <label class="rename__label">规则作用于扩展名</label>
         <n-switch v-model:value="config.includeExt" size="small" />
       </div>
-      <div class="rename__field rename__field--row">
-        <label class="rename__label">包含子文件夹</label>
-        <n-switch v-model:value="config.recursive" size="small" />
-      </div>
-      <p class="rename__hint">「包含子文件夹」只影响之后新添加的文件夹。</p>
       <p class="rename__hint">撤销记录只在本页停留期间有效，离开页面即失效。</p>
     </template>
 
@@ -315,11 +317,12 @@ import type { PickedFile, RenameConflict, RenameDone } from '@shared/types';
 import ToolPageLayout from '@/components/layout/ToolPageLayout.vue';
 import StatusTag from '@/components/common/StatusTag.vue';
 import { useFileDrop } from '@/composables/useFileDrop';
+import { useFolderImport } from '@/composables/useFolderImport';
 import { useToolConfig } from '@/composables/useToolConfig';
-import { pickDirectoryApi, pickFilesApi } from '@/services/fs';
-import { renameBatchApi, scanDirApi, showInFolderApi } from '@/services/file';
+import { pickFilesApi } from '@/services/fs';
+import { renameBatchApi, showInFolderApi } from '@/services/file';
 import { formatBytes, formatDateTime } from '@/utils/format';
-import { basenameOf, dirnameOf, joinPath } from '@/utils/path';
+import { basenameOf, dirnameOf } from '@/utils/path';
 import {
   applyRules,
   createRule,
@@ -419,10 +422,16 @@ const { config } = useToolConfig('file-rename', {
 // 存储里读回的老规则可能缺新加的字段，补齐后再交给模板
 config.rules = normalizeRules(config.rules);
 
+/** 从文件夹添加（与图片三页共用实现）。重命名不限扩展名，不传 accept。 */
+const { scanning, importFolder } = useFolderImport({
+  key: 'rename',
+  maxFiles: MAX_FILES,
+  title: '选择要重命名的文件夹',
+});
+
 const items = ref<RenameItem[]>([]);
 const checkedKeys = ref<string[]>([]);
 const running = ref(false);
-const scanning = ref(false);
 /** 上一批成功改名的记录，反向即为撤销。 */
 const undoRecord = ref<RenameDone[]>([]);
 /** 拖拽中的规则下标。 */
@@ -629,41 +638,8 @@ async function handlePickFiles(): Promise<void> {
 
 /** 选择文件夹，把其中的文件加入列表。 */
 async function handlePickDir(): Promise<void> {
-  const dir = await pickDirectoryApi('选择要重命名的文件夹');
-  if (!dir) return;
-
-  scanning.value = true;
-  try {
-    const result = await scanDirApi({
-      scanId: `rename-${Date.now()}`,
-      root: dir,
-      includeHidden: true,
-      skipIgnoredDirs: false,
-      ignoreDirs: [],
-      maxFiles: MAX_FILES,
-      // 关掉「包含子文件夹」就只取当前层
-      maxDepth: config.recursive ? undefined : 1,
-    });
-    const files: PickedFile[] = result.files.map((file) => ({
-      path: joinPath(result.dirs[file.dirIndex] ?? dir, file.name),
-      name: file.name,
-      size: file.size,
-      ext: file.ext,
-      mtime: file.mtime,
-    }));
-    if (!files.length) {
-      message.warning('该文件夹下没有文件');
-      return;
-    }
-    addFiles(files);
-    if (result.truncated) {
-      message.warning(`文件数超过 ${MAX_FILES.toLocaleString()}，只取了前一部分`);
-    }
-  } catch {
-    // 错误提示已由 services 统一弹出
-  } finally {
-    scanning.value = false;
-  }
+  const files = await importFolder(config.recursive);
+  if (files.length) addFiles(files);
 }
 
 /**
@@ -885,6 +861,12 @@ async function handleUndo(): Promise<void> {
 
   &__table {
     height: 100%;
+  }
+
+  // 「含子文件夹」只服务于旁边的「添加文件夹」，压暗一档避免与主操作抢注意力
+  &__recursive {
+    font-size: 13px;
+    color: var(--tb-text-secondary);
   }
 
   &__placeholder {

@@ -57,3 +57,19 @@ export interface StylizeItem extends FileItem {
   /** 输出文件路径。 */
   outputPath?: string;
 }
+
+/** 精灵图合并列表项：在通用文件项上附加缩略图。 */
+export interface SpriteMergeItem extends FileItem {
+  /** 缩略图 data URL（异步加载）。 */
+  thumbnail?: string;
+}
+
+/** 二维码解析列表项：在通用文件项上附加缩略图与解析结果。 */
+export interface QrDecodeItem extends FileItem {
+  /** 缩略图 data URL（异步加载）。 */
+  thumbnail?: string;
+  /** 解析出的文本；未识别为空。 */
+  result?: string;
+  /** 是否已解析（区分「未识别」与「还没解析」）。 */
+  decoded?: boolean;
+}

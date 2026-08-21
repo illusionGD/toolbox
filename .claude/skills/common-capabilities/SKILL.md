@@ -40,7 +40,8 @@ description: Toolbox 通用能力——文件对话框/拖拽 IPC、渲染进程
 
 ## 边界 / 后续
 
-- 「添加文件夹」当前仅返回路径并提示，**递归扫描目录内文件**交由具体工具按需实现（不同工具接受的扩展名不同）。
+- 「添加文件夹」由 `useFolderImport`（`src/composables/useFolderImport.ts`）统一实现，四个页面（压缩/裁剪/风格化/批量重命名）共用：选目录 → `scanDirApi` 递归 → 摊平成 `PickedFile[]` → 交回各页自己的 `addFiles` 去重入列。**扩展名过滤交给主进程**（`ScanOptions.extensions`）而不是在渲染进程筛，否则 `maxFiles` 会先被目录里的非目标文件占满——扫一个代码目录会先被几千个 `.js` 填满上限、一张图都拿不到。递归开关走各页 `useToolConfig` 里的 `recursive`（默认关，`maxDepth: 1`）。
+- `src/utils/taskQueue.ts` — `createTaskQueue(limit)`，渲染进程的限并发队列。存在的理由见 [[image-compress]]：「加入列表就为每项发一次主进程调用」这种写法在文件夹导入下会变成上千个并发 sharp 解码。`push` 吞掉任务异常（一张坏图不能拖垮队列），`clear` 丢弃未开始的任务。
 - FileList 未内置分页/多选/排序，需要的工具页自行通过 `columns` 或包装扩展。
 - 实际处理逻辑（压缩等）由各工具的主进程 handler + services 提供，此处只有 UI 骨架。
 

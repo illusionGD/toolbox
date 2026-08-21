@@ -119,6 +119,13 @@ mosaic → blur → median → sharpen → grayscale → sepia → tint → modu
 - 预览目标行：优先第一个勾选项，否则列表第一项。
 - 没开任何效果时明确写「未启用任何效果，显示原图」，不留白。
 
+### 「添加文件夹」+ 分页 + 懒加载缩略图
+
+与 [[image-compress]] 同一套（`useFolderImport` 导入、工具栏「含子文件夹」复选框、受控分页 `PAGE_SIZE = 50`、缩略图只为当前页加载并经 `createTaskQueue(4)` 限并发 + `thumbRequested` 去重、**表格不能开列排序**），细节见那份 skill，此处只记本页的不同：
+
+- 只需要一条 `thumbQueue`。本页没有逐项探测，`addFiles` 里除缩略图外只有一次 `schedulePreview()`（预览是**单张**的，与列表长度无关，不会随导入量放大）。
+- `handleClear` 要清 `thumbQueue` + `thumbRequested`，**并且重置 `previewUrl`**——预览目标行没了，留着上一张的图会让人以为效果没跟着参数变。
+
 ## 验证
 
 `format/lint/typecheck/build` 全绿。sharp 管线以真实图片脚本验证 **145 项全过**（脚本与素材放临时目录，验完即删）。

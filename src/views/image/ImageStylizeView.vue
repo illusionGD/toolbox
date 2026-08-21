@@ -6,15 +6,18 @@
   >
     <!-- 操作栏 -->
     <template #toolbar>
-      <n-space>
+      <n-space align="center">
         <n-button type="primary" @click="handleAddFiles">
           <template #icon><n-icon :component="CloudUploadOutline" /></template>
           添加文件
         </n-button>
-        <n-button @click="handleAddFolder">
+        <n-button :loading="scanning" @click="handleAddFolder">
           <template #icon><n-icon :component="FolderOpenOutline" /></template>
           添加文件夹
         </n-button>
+        <n-checkbox v-model:checked="config.recursive" class="stylize__recursive">
+          含子文件夹
+        </n-checkbox>
         <n-button quaternary :disabled="!checkedKeys.length" @click="handleRemoveChecked">
           <template #icon><n-icon :component="TrashOutline" /></template>
           移除选中{{ checkedKeys.length ? `(${checkedKeys.length})` : '' }}
@@ -40,8 +43,10 @@
             :columns="columns"
             :data="items"
             :row-key="(row: StylizeItem) => row.id"
+            :pagination="pagination"
             flex-height
             class="stylize__table"
+            @update:page="(p: number) => (pagination.page = p)"
           />
           <div v-else class="stylize__empty">
             <n-icon :size="40" :depth="3" :component="CloudUploadOutline" />
@@ -334,10 +339,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, h, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import {
   NButton,
   NCard,
+  NCheckbox,
   NCollapse,
   NCollapseItem,
   NColorPicker,
@@ -377,6 +383,7 @@ import ImagePreviewModal from '@/components/common/ImagePreviewModal.vue';
 import RegionCanvas from '@/components/common/RegionCanvas.vue';
 import StatusTag from '@/components/common/StatusTag.vue';
 import { useFileDrop } from '@/composables/useFileDrop';
+import { useFolderImport } from '@/composables/useFolderImport';
 import { useToolConfig } from '@/composables/useToolConfig';
 import { pickDirectoryApi, pickFilesApi } from '@/services/fs';
 import {
@@ -386,12 +393,22 @@ import {
   stylizePreviewApi,
 } from '@/services/image';
 import { formatBytes } from '@/utils/format';
+import { createTaskQueue } from '@/utils/taskQueue';
 
 // #region state
 const message = useMessage();
 
 /** 支持的图片扩展名（与压缩/裁剪页一致，均为 sharp 可解码格式）。 */
 const ACCEPT = ['jpg', 'jpeg', 'png', 'webp', 'avif', 'gif', 'tif', 'tiff', 'svg', 'heic', 'heif'];
+
+/** 每页行数。分页把缩略图的加载量固定在一页之内。 */
+const PAGE_SIZE = 50;
+
+/** 从文件夹导入的上限。 */
+const MAX_FILES = 50_000;
+
+/** 缩略图并发数：主进程逐个 sharp 解码，开太多只是互相排队还占满 CPU。 */
+const THUMB_CONCURRENCY = 4;
 
 /**
  * 预览节流延时 ms。
@@ -445,7 +462,20 @@ const { config } = useToolConfig('image-stylize', {
   quality: 90,
   outputDir: '',
   overwrite: false,
+  recursive: false,
 });
+
+/** 从文件夹添加（与压缩/裁剪/重命名共用实现）。 */
+const { scanning, importFolder } = useFolderImport({
+  key: 'stylize',
+  accept: ACCEPT,
+  maxFiles: MAX_FILES,
+  title: '选择图片文件夹',
+});
+
+/** 缩略图加载队列 + 已入队的 id，避免翻回上一页时重复发请求。 */
+const thumbQueue = createTaskQueue(THUMB_CONCURRENCY);
+const thumbRequested = new Set<string>();
 
 const formatOptions = [
   { label: '保持原格式', value: 'original' },
@@ -524,6 +554,53 @@ const canStart = computed(
 
 const startLabel = computed(() =>
   checkedKeys.value.length ? `开始处理 (${checkedKeys.value.length})` : '开始处理',
+);
+
+/** 表格分页（受控，因为要知道当前页是哪些行才能只给它们加载缩略图）。 */
+const pagination = reactive({
+  page: 1,
+  pageSize: PAGE_SIZE,
+  itemCount: 0,
+  showQuickJumper: true,
+  prefix: ({ itemCount }: { itemCount?: number }) => `共 ${itemCount ?? 0} 张`,
+});
+watch(
+  () => items.value.length,
+  (count) => {
+    pagination.itemCount = count;
+    const pageCount = Math.max(1, Math.ceil(count / PAGE_SIZE));
+    if (pagination.page > pageCount) pagination.page = pageCount;
+  },
+  { immediate: true },
+);
+
+/** 当前页的行（表格未开列排序，`:data` 顺序即渲染顺序，切片与表格内部一致）。 */
+const visibleItems = computed(() =>
+  items.value.slice((pagination.page - 1) * PAGE_SIZE, pagination.page * PAGE_SIZE),
+);
+
+/**
+ * 只为当前页缺缩略图的行排队加载。
+ *
+ * 从前是在 addFiles 里逐个 `void getThumbnailApi()`，手挑十几个文件没问题，
+ * 但文件夹导入上千张会同时打爆主进程——分页 + 限并发把这件事的规模钉在一页之内。
+ */
+watch(
+  visibleItems,
+  (rows) => {
+    for (const row of rows) {
+      if (row.thumbnail || thumbRequested.has(row.id)) continue;
+      thumbRequested.add(row.id);
+      const { id, path } = row;
+      thumbQueue.push(async () => {
+        const url = await getThumbnailApi(path);
+        // await 期间用户可能已移除该项，按 id 回查而不是复用引用
+        const target = items.value.find((i) => i.id === id);
+        if (target) target.thumbnail = url;
+      });
+    }
+  },
+  { immediate: true },
 );
 // #endregion
 
@@ -681,22 +758,14 @@ onBeforeUnmount(() => {
 // #endregion
 
 // #region actions
-/** 追加文件（按路径去重），异步加载缩略图。 */
+/** 追加文件（按路径去重）。缩略图不在这里加载，交给当前页的 watch 按需取。 */
 function addFiles(files: PickedFile[]): void {
   const existing = new Set(items.value.map((i) => i.path));
   const fresh = files.filter((f) => !existing.has(f.path) && ACCEPT.includes(f.ext));
   if (!fresh.length) return;
 
   for (const file of fresh) {
-    const id = `stylize-${seq++}`;
-    items.value.push({ ...file, id, status: 'pending' });
-    void getThumbnailApi(file.path)
-      .then((url) => {
-        // 异步回来时要按 id 回查响应式项，不能改 push 前的原始对象
-        const target = items.value.find((i) => i.id === id);
-        if (target) target.thumbnail = url;
-      })
-      .catch(() => {});
+    items.value.push({ ...file, id: `stylize-${seq++}`, status: 'pending' });
   }
   schedulePreview();
 }
@@ -711,10 +780,15 @@ async function handleAddFiles(): Promise<void> {
   if (files.length) addFiles(files);
 }
 
-/** 选择文件夹（批量导入待后续版本）。 */
+/** 从文件夹批量导入（扩展名过滤在主进程遍历时完成）。 */
 async function handleAddFolder(): Promise<void> {
-  const dir = await pickDirectoryApi('选择图片文件夹');
-  if (dir) message.info(`文件夹批量导入将在后续版本支持：${dir}`);
+  const before = items.value.length;
+  const files = await importFolder(config.recursive);
+  if (!files.length) return;
+  addFiles(files);
+  const added = items.value.length - before;
+  if (added) message.success(`已添加 ${added} 张图片`);
+  else message.info('这些图片已在列表中');
 }
 
 /** 清空列表。 */
@@ -722,6 +796,8 @@ function handleClear(): void {
   items.value = [];
   checkedKeys.value = [];
   previewUrl.value = '';
+  thumbQueue.clear();
+  thumbRequested.clear();
 }
 
 /** 移除选中项。 */
@@ -917,6 +993,12 @@ async function handleStart(): Promise<void> {
 
   &__table {
     height: 100%;
+  }
+
+  // 「含子文件夹」只服务于旁边的「添加文件夹」，压暗一档避免与主操作抢注意力
+  &__recursive {
+    font-size: 13px;
+    color: var(--tb-text-secondary);
   }
 
   &__empty {

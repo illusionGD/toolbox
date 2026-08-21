@@ -27,6 +27,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
       { key: 'image-crop', label: '图片裁剪', path: '/image/crop' },
       { key: 'image-stylize', label: '风格化', path: '/image/stylize' },
       { key: 'image-sprite', label: '精灵图', path: '/image/sprite' },
+      { key: 'image-qrcode', label: '二维码', path: '/image/qrcode' },
     ],
   },
   {

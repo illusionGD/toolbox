@@ -74,6 +74,12 @@ export interface ScanOptions {
   maxFiles?: number;
   /** 最大递归深度，1 = 只取根目录当前层；缺省不限制。 */
   maxDepth?: number;
+  /**
+   * 只收这些扩展名（小写、不含点）；缺省或空数组表示不过滤。
+   * 在**遍历时**就过滤掉，所以 maxFiles 与 truncated 都只针对匹配的文件——
+   * 否则「从文件夹添加图片」会先被一个代码目录里的几千个 .js 填满上限，一张图都拿不到。
+   */
+  extensions?: string[];
 }
 
 /**
@@ -560,4 +566,387 @@ export interface StylizeResult {
   outputFormat: Exclude<ImageOutputFormat, 'original'>;
   /** 实际施加的效果趟数（0 = 未启用任何效果，仅重编码）。 */
   appliedCount: number;
+}
+
+/* ── 精灵图（合并 / 切割） ─────────────────────────────────────────── */
+
+/**
+ * 精灵表排列方式。
+ * grid：按行列网格排布，实现简单、坐标好算，但小图尺寸不一时浪费空间。
+ * packed：紧凑装箱（MaxRects），本轮不做，枚举先留位以便后续扩展不改签名。
+ */
+export type SpriteLayout = 'grid';
+
+/** 网格排列内的对齐方式（各格尺寸不一时，小图在格内如何摆放）。 */
+export type SpriteAlign = 'topLeft' | 'center';
+
+/** 精灵表坐标数据的导出格式。 */
+export type SpriteDataFormat = 'json' | 'css' | 'plist' | 'none';
+
+/** 合并：单张输入图在精灵表里的最终位置（原始像素坐标）。 */
+export interface SpriteFrame {
+  /** 帧名（取源文件名，用于坐标数据的 key）。 */
+  name: string;
+  /** 源文件路径。 */
+  sourcePath: string;
+  /** 距表左边缘偏移 px。 */
+  left: number;
+  /** 距表上边缘偏移 px。 */
+  top: number;
+  /** 帧宽 px。 */
+  width: number;
+  /** 帧高 px。 */
+  height: number;
+}
+
+/** 合并精灵表选项。 */
+export interface SpriteMergeOptions {
+  /** 参与合并的图片路径（顺序即排布顺序）。 */
+  sources: string[];
+  /** 排列方式。 */
+  layout: SpriteLayout;
+  /** 网格列数（layout=grid）；<=0 时按图片数开方自动取近似正方形。 */
+  columns: number;
+  /** 相邻格之间的间距 px。 */
+  spacing: number;
+  /** 表四周的外边距 px。 */
+  padding: number;
+  /** 各格尺寸不一时小图在格内的对齐。 */
+  align: SpriteAlign;
+  /**
+   * 单张图集的最大边长 px（1024/2048/4096 等）；<=0 表示不限制、始终单张。
+   * 放不下时按最大尺寸拆成多张图集。
+   */
+  maxSize: number;
+  /** 导出前剔除每张图四周的透明边（各帧按自身内容裁紧，坐标随之更新）。 */
+  trim: boolean;
+  /** 坐标数据导出格式。 */
+  dataFormat: SpriteDataFormat;
+  /** 输出图片格式（不含 original，精灵表一律显式格式，默认 png 保透明）。 */
+  format: Exclude<ImageOutputFormat, 'original'>;
+  /** 质量 1-100（语义同压缩）。 */
+  quality: number;
+  /** 输出目录绝对路径。 */
+  outputDir: string;
+  /** 输出文件名（不含扩展名），如 'sprite'。 */
+  baseName: string;
+}
+
+/** 合并结果。 */
+/** 合并结果（可能产出多张图集）。 */
+export interface SpriteMergeResult {
+  /** 生成的图集图片路径（受 maxSize 影响可能多张）。 */
+  sheetPaths: string[];
+  /** 坐标数据文件路径；dataFormat=none 时为空数组，多张图集各一份。 */
+  dataPaths: string[];
+  /** 实际合并的帧数（跨所有图集）。 */
+  frameCount: number;
+  /** 生成的图集张数。 */
+  sheetCount: number;
+}
+
+/** 单张图集的预览。 */
+export interface SpriteSheetPreview {
+  /** 预览图 data URL（webp，过大已缩到长边上限内）。 */
+  dataUrl: string;
+  /** 图集实际总宽 px（未缩放前）。 */
+  width: number;
+  /** 图集实际总高 px（未缩放前）。 */
+  height: number;
+  /** 本张图集含帧数。 */
+  frameCount: number;
+}
+
+/** 合并预览结果（只算不写盘，可能多张图集）。 */
+export interface SpriteMergePreview {
+  /** 各图集的预览。 */
+  sheets: SpriteSheetPreview[];
+  /** 参与合并的总帧数。 */
+  frameCount: number;
+}
+
+/**
+ * 切割方式。
+ * grid：按行列数或格尺寸等分。
+ * lines：按渲染进程给的横/纵切割线位置切成不等分网格。
+ * import：解析已有坐标文件（JSON/plist）反向切。
+ * auto：按透明像素连通域自动圈出每个精灵的包围盒。
+ */
+export type SpriteSliceMethod = 'grid' | 'lines' | 'import' | 'auto';
+
+/** 一个切割单元（原始像素矩形 + 导出用名字）。 */
+export interface SpriteCell {
+  /** 单元矩形（原图坐标系）。 */
+  rect: CropRect;
+  /** 导出文件名（不含扩展名）。 */
+  name: string;
+}
+
+/** 固定网格切割参数。 */
+export interface SpriteGridSpec {
+  /** 按数量分：列数、行数（>0 时优先）。 */
+  columns: number;
+  rows: number;
+  /** 按尺寸分：单元宽高 px（columns/rows<=0 时用）。 */
+  cellWidth: number;
+  cellHeight: number;
+  /** 单元之间的间距 px（雪碧图常见）。 */
+  spacing: number;
+  /** 表四周外边距 px。 */
+  margin: number;
+}
+
+/** 切割探测选项（只算不写，返回将要切出的单元）。 */
+export interface SpriteSliceProbeOptions {
+  /** 切割方式。 */
+  method: SpriteSliceMethod;
+  /** grid 方式的网格参数。 */
+  grid?: SpriteGridSpec;
+  /** lines 方式的纵向切割线 x 坐标（原始像素，已排序去重）。 */
+  columnsAt?: number[];
+  /** lines 方式的横向切割线 y 坐标。 */
+  rowsAt?: number[];
+  /** import 方式的坐标文件路径（JSON/plist）。 */
+  dataPath?: string;
+  /** auto 方式：alpha 大于此值视为不透明（0-255）。 */
+  alphaThreshold?: number;
+  /** auto 方式：小于此面积（px²）的连通块丢弃（滤噪点）。 */
+  minArea?: number;
+}
+
+/** 切割探测结果。 */
+export interface SpriteSliceProbe {
+  /** 精灵表宽 px。 */
+  width: number;
+  /** 精灵表高 px。 */
+  height: number;
+  /** 计算出的切割单元。 */
+  cells: SpriteCell[];
+}
+
+/** 执行切割选项（单元由渲染进程确定后传入）。 */
+export interface SpriteSliceOptions {
+  /** 要切出的单元。 */
+  cells: SpriteCell[];
+  /** 输出格式。 */
+  format: Exclude<ImageOutputFormat, 'original'>;
+  /** 质量 1-100。 */
+  quality: number;
+  /** 输出目录绝对路径。 */
+  outputDir: string;
+}
+
+/** 切割结果。 */
+export interface SpriteSliceResult {
+  /** 成功切出的文件路径。 */
+  outputPaths: string[];
+  /** 因矩形非法（越界/零面积）被跳过的单元数。 */
+  skipped: number;
+}
+
+/* ── 二维码（生成 / 解析） ────────────────────────────────────────── */
+
+/** 二维码容错级别：L(7%) < M(15%) < Q(25%) < H(30%)，越高越耐污损但码更密。 */
+export type QrErrorLevel = 'L' | 'M' | 'Q' | 'H';
+
+/** 二维码输出格式。 */
+export type QrOutputFormat = 'png' | 'jpg' | 'svg';
+
+/** 单条待生成的二维码（内容 + 输出文件名，不含扩展名）。 */
+export interface QrGenerateItem {
+  /** 编码内容。 */
+  text: string;
+  /** 输出文件名（不含扩展名），渲染进程已按模板/序号/手改定好。 */
+  name: string;
+}
+
+/** 二维码生成选项。 */
+export interface QrGenerateOptions {
+  /** 待生成条目。 */
+  items: QrGenerateItem[];
+  /** 输出边长 px（png/jpg 有效；svg 为矢量，此值作参考）。 */
+  size: number;
+  /** 静区边距（模块数）。 */
+  margin: number;
+  /** 容错级别。 */
+  level: QrErrorLevel;
+  /** 前景色（深色模块），如 '#000000'。 */
+  dark: string;
+  /** 背景色，如 '#ffffff'。 */
+  light: string;
+  /** 输出格式。 */
+  format: QrOutputFormat;
+  /** 输出目录绝对路径。 */
+  outputDir: string;
+}
+
+/** 二维码生成结果。 */
+export interface QrGenerateResult {
+  /** 成功生成的文件路径。 */
+  outputPaths: string[];
+  /** 生成失败的条目数（如内容过长超出容量）。 */
+  failed: number;
+}
+
+/** 二维码解析选项（预览用，不写盘）。 */
+export interface QrPreviewOptions {
+  /** 编码内容。 */
+  text: string;
+  /** 边长 px。 */
+  size: number;
+  /** 静区边距（模块数）。 */
+  margin: number;
+  /** 容错级别。 */
+  level: QrErrorLevel;
+  /** 前景色。 */
+  dark: string;
+  /** 背景色。 */
+  light: string;
+}
+
+/** 单张图片的二维码解析结果。 */
+export interface QrDecodeResult {
+  /** 源文件路径。 */
+  path: string;
+  /** 文件名。 */
+  name: string;
+  /** 解析出的文本；未识别到为 null。 */
+  text: string | null;
+  /** 是否成功识别。 */
+  ok: boolean;
+}
+
+/* ── 视频（ffmpeg） ───────────────────────────────────────────────── */
+
+/** 单条媒体流的信息（ffprobe 结果的精简投影）。 */
+export interface VideoStreamInfo {
+  /** 编码名，如 h264 / aac。 */
+  codec: string;
+  /** 宽度 px（音频流为 0）。 */
+  width: number;
+  /** 高度 px（音频流为 0）。 */
+  height: number;
+  /** 帧率（音频流为 0）。 */
+  fps: number;
+  /** 像素格式，如 yuv420p（音频流为空串）。 */
+  pixelFormat: string;
+  /** 声道数（视频流为 0）。 */
+  channels: number;
+  /** 采样率 Hz（视频流为 0）。 */
+  sampleRate: number;
+  /** 该流码率 bps；ffprobe 未给出时为 0。 */
+  bitrate: number;
+}
+
+/** 视频文件的元信息。 */
+export interface VideoMeta {
+  /** 时长秒；容器未给出时为 0（此时进度只能按已处理时间显示）。 */
+  duration: number;
+  /** 容器格式名，如 mov,mp4,m4a。 */
+  container: string;
+  /** 总码率 bps；未知为 0。 */
+  bitrate: number;
+  /** 文件大小字节。 */
+  size: number;
+  /** 首条视频流；无视频流为 null。 */
+  video: VideoStreamInfo | null;
+  /** 首条音频流；无音频流为 null。 */
+  audio: VideoStreamInfo | null;
+}
+
+/**
+ * 当前 ffmpeg 构建实际可用的编码器。
+ * 打包的是 2018 年的 4.1 构建，文档列的编码器不等于这个构建有——
+ * 一律探测后再决定 UI 上给哪些选项，别照文档写死。
+ */
+export interface VideoCapabilities {
+  /** ffmpeg 版本串。 */
+  version: string;
+  /** 可用的视频编码器名集合。 */
+  videoEncoders: string[];
+  /** 可用的音频编码器名集合。 */
+  audioEncoders: string[];
+}
+
+/** 输出容器格式。original = 保持源容器。 */
+export type VideoOutputFormat = 'original' | 'mp4' | 'webm' | 'mkv' | 'gif';
+
+/** 视频编码器。copy = 不重新编码，只换封装。 */
+export type VideoCodec = 'libx264' | 'libx265' | 'libvpx-vp9' | 'copy';
+
+/** 音频处理方式。 */
+export type VideoAudioMode = 'encode' | 'copy' | 'remove';
+
+/** 压缩模式。 */
+export type VideoQualityMode = 'quality' | 'bitrate' | 'targetSize';
+
+/** 转码选项。 */
+export interface TranscodeOptions {
+  /** 任务 id，用于关联进度推送与取消。 */
+  taskId: string;
+  /** 输出容器。 */
+  format: VideoOutputFormat;
+  /** 视频编码器。 */
+  codec: VideoCodec;
+  /** 压缩模式。 */
+  qualityMode: VideoQualityMode;
+  /** quality 模式的 CRF 值，越小越清晰。 */
+  crf: number;
+  /** bitrate 模式的目标视频码率 kbps。 */
+  videoBitrate: number;
+  /** targetSize 模式的目标文件大小 MB。 */
+  targetSizeMb: number;
+  /** 最大高度 px；0 = 不限制。宽度按比例并向偶数取整。 */
+  maxHeight: number;
+  /** 帧率上限；0 = 保持源帧率。 */
+  maxFps: number;
+  /** 音频处理方式。 */
+  audioMode: VideoAudioMode;
+  /** encode 模式的音频码率 kbps。 */
+  audioBitrate: number;
+  /** GIF 输出的帧率。 */
+  gifFps: number;
+  /** GIF 输出的宽度 px。 */
+  gifWidth: number;
+  /** 输出目录（overwrite 为 true 时忽略）。 */
+  outputDir: string;
+  /** 是否覆盖原文件。 */
+  overwrite: boolean;
+  /**
+   * 时间剪切区间（秒）。本轮不接入 UI，为下一轮的裁剪页预留，
+   * 使两页共用同一个 transcodeOne，不必改签名。
+   */
+  trim?: { start: number; end: number };
+  /** 画面裁剪矩形（源像素坐标）。同 trim，为下一轮预留。 */
+  crop?: CropRect;
+}
+
+/** 转码结果。 */
+export interface TranscodeResult {
+  /** 源文件路径。 */
+  sourcePath: string;
+  /** 输出文件路径；被取消时为空串。 */
+  outputPath: string;
+  /** 原始大小字节。 */
+  originalSize: number;
+  /** 输出大小字节；被取消时为 0。 */
+  outputSize: number;
+  /** 体积变化百分比，正数为变小；可能为负（转码常常变大）。 */
+  ratio: number;
+  /** 是否被用户取消。取消不是错误，正常返回并置位。 */
+  canceled: boolean;
+  /** 是否走了 -c copy（只换封装、未重新编码）。 */
+  streamCopy: boolean;
+}
+
+/** 转码进度推送。 */
+export interface VideoProgress {
+  /** 任务 id。 */
+  taskId: string;
+  /** 已处理到的时间点（秒）。 */
+  outTime: number;
+  /** 完成百分比 0-100；源时长未知时为 -1（页面改显示已处理时间）。 */
+  percent: number;
+  /** 处理速度倍率，如 2.5 表示 2.5x；未知为 0。 */
+  speed: number;
 }

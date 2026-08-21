@@ -6,15 +6,18 @@
   >
     <!-- 操作栏 -->
     <template #toolbar>
-      <n-space>
+      <n-space align="center">
         <n-button type="primary" @click="handleAddFiles">
           <template #icon><n-icon :component="CloudUploadOutline" /></template>
           添加文件
         </n-button>
-        <n-button @click="handleAddFolder">
+        <n-button :loading="scanning" @click="handleAddFolder">
           <template #icon><n-icon :component="FolderOpenOutline" /></template>
           添加文件夹
         </n-button>
+        <n-checkbox v-model:checked="config.recursive" class="crop__recursive">
+          含子文件夹
+        </n-checkbox>
         <n-button quaternary :disabled="!checkedKeys.length" @click="handleRemoveChecked">
           <template #icon><n-icon :component="TrashOutline" /></template>
           移除选中{{ checkedKeys.length ? `(${checkedKeys.length})` : '' }}
@@ -35,8 +38,10 @@
           :columns="columns"
           :data="items"
           :row-key="(row: CropItem) => row.id"
+          :pagination="pagination"
           flex-height
           class="crop__table"
+          @update:page="(p: number) => (pagination.page = p)"
         />
         <div v-else class="crop__empty">
           <n-icon :size="40" :depth="3" :component="CloudUploadOutline" />
@@ -231,10 +236,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref, watch } from 'vue';
+import { computed, h, reactive, ref, watch } from 'vue';
 import {
   NButton,
   NCard,
+  NCheckbox,
   NColorPicker,
   NDataTable,
   NIcon,
@@ -274,10 +280,12 @@ import CropCanvas from '@/components/common/CropCanvas.vue';
 import ImagePreviewModal from '@/components/common/ImagePreviewModal.vue';
 import StatusTag from '@/components/common/StatusTag.vue';
 import { useFileDrop } from '@/composables/useFileDrop';
+import { useFolderImport } from '@/composables/useFolderImport';
 import { useToolConfig } from '@/composables/useToolConfig';
 import { pickDirectoryApi, pickFilesApi } from '@/services/fs';
 import { cropImageApi, getDataUrlApi, getThumbnailApi, probeCropApi } from '@/services/image';
 import { formatBytes } from '@/utils/format';
+import { createTaskQueue } from '@/utils/taskQueue';
 
 // #region state
 const message = useMessage();
@@ -287,6 +295,15 @@ const ACCEPT = ['jpg', 'jpeg', 'png', 'webp', 'avif', 'gif', 'tif', 'tiff', 'svg
 
 /** 探测节流延时 ms：探测虽不写盘但仍是全图解码，不能每次滑动都打。 */
 const PROBE_DEBOUNCE = 300;
+
+/** 每页行数。分页把缩略图的加载量固定在一页之内。 */
+const PAGE_SIZE = 50;
+
+/** 从文件夹导入的上限。 */
+const MAX_FILES = 50_000;
+
+/** 缩略图与包围盒探测的并发数（都是主进程里的 sharp 解码，共用一个上限口径）。 */
+const IMAGE_CONCURRENCY = 4;
 
 const items = ref<CropItem[]>([]);
 const checkedKeys = ref<string[]>([]);
@@ -307,7 +324,27 @@ const { config } = useToolConfig('image-crop', {
   quality: 90,
   outputDir: '',
   overwrite: false,
+  recursive: false,
 });
+
+/** 从文件夹添加（与压缩/风格化/重命名共用实现）。 */
+const { scanning, importFolder } = useFolderImport({
+  key: 'crop',
+  accept: ACCEPT,
+  maxFiles: MAX_FILES,
+  title: '选择图片文件夹',
+});
+
+/**
+ * 缩略图与包围盒探测各用一条限并发队列。
+ *
+ * 从前加入列表时逐项 `void getThumbnailApi()` + `void probeItem()` 全部发出去，
+ * 手挑十几个文件没事，文件夹导入上千张就是上千个并发 sharp 解码。
+ * 分成两条是因为**探测队列需要整条丢弃**（参数一改结果全作废），
+ * 而缩略图一旦标记为已请求就不会再排，跟着被清掉就永远是空白格。
+ */
+const thumbQueue = createTaskQueue(IMAGE_CONCURRENCY);
+const probeQueue = createTaskQueue(IMAGE_CONCURRENCY);
 
 const bgOptions = [
   { label: '自动识别（左上角）', value: 'auto' },
@@ -396,6 +433,50 @@ const canStart = computed(
 
 const startLabel = computed(() =>
   checkedKeys.value.length ? `开始裁剪 (${checkedKeys.value.length})` : '开始裁剪',
+);
+
+/** 表格分页（受控，因为要知道当前页是哪些行才能只给它们加载缩略图）。 */
+const pagination = reactive({
+  page: 1,
+  pageSize: PAGE_SIZE,
+  itemCount: 0,
+  showQuickJumper: true,
+  prefix: ({ itemCount }: { itemCount?: number }) => `共 ${itemCount ?? 0} 张`,
+});
+watch(
+  () => items.value.length,
+  (count) => {
+    pagination.itemCount = count;
+    const pageCount = Math.max(1, Math.ceil(count / PAGE_SIZE));
+    if (pagination.page > pageCount) pagination.page = pageCount;
+  },
+  { immediate: true },
+);
+
+/** 当前页的行（表格未开列排序，`:data` 顺序即渲染顺序，切片与表格内部一致）。 */
+const visibleItems = computed(() =>
+  items.value.slice((pagination.page - 1) * PAGE_SIZE, pagination.page * PAGE_SIZE),
+);
+
+/** 已入队缩略图的 id，避免翻回上一页重复请求。 */
+const thumbRequested = new Set<string>();
+
+// 缩略图纯展示，只给当前页加载
+watch(
+  visibleItems,
+  (rows) => {
+    for (const row of rows) {
+      if (row.thumbnail || thumbRequested.has(row.id)) continue;
+      thumbRequested.add(row.id);
+      const { id, path } = row;
+      thumbQueue.push(async () => {
+        const url = await getThumbnailApi(path);
+        const target = items.value.find((i) => i.id === id);
+        if (target) target.thumbnail = url;
+      });
+    }
+  },
+  { immediate: true },
 );
 // #endregion
 
@@ -535,10 +616,23 @@ async function probeItem(id: string): Promise<void> {
   }
 }
 
-/** 重新探测所有项（自动模式参数变更时）。 */
+/**
+ * 重新探测所有项（自动模式参数变更时）。
+ *
+ * 参数一改，队列里排着的旧探测结果就全作废，先整条丢掉再重排。
+ * **当前页排在最前**：用户拖滑块时眼睛盯的就是这一页，几百项慢慢排队也能先看到反馈。
+ * 仍然探测全部而不只探当前页，是因为「统一输出尺寸」要拿所有项的包围盒算公共画布，
+ * 手动模式的「应用到全部」也要每项的原图尺寸。
+ */
 function probeAll(): void {
   if (config.mode !== 'auto') return;
-  for (const item of items.value) void probeItem(item.id);
+  probeQueue.clear();
+  const visible = new Set(visibleItems.value.map((i) => i.id));
+  const ordered = [...visibleItems.value, ...items.value.filter((i) => !visible.has(i.id))];
+  for (const item of ordered) {
+    const { id } = item;
+    probeQueue.push(() => probeItem(id));
+  }
 }
 
 let probeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -565,7 +659,10 @@ watch(
 // #endregion
 
 // #region actions
-/** 追加文件（按路径去重），异步加载缩略图并探测包围盒。 */
+/**
+ * 追加文件（按路径去重），并排队探测包围盒。
+ * 缩略图不在这里加载，交给当前页的 watch 按需取。
+ */
 function addFiles(files: PickedFile[]): void {
   const existing = new Set(items.value.map((i) => i.path));
   const fresh = files.filter((f) => !existing.has(f.path) && ACCEPT.includes(f.ext));
@@ -574,14 +671,8 @@ function addFiles(files: PickedFile[]): void {
   for (const file of fresh) {
     const id = `crop-${seq++}`;
     items.value.push({ ...file, id, status: 'pending' });
-    void getThumbnailApi(file.path)
-      .then((url) => {
-        const target = items.value.find((i) => i.id === id);
-        if (target) target.thumbnail = url;
-      })
-      .catch(() => {});
     // 无论哪种模式都探测一次：自动模式要显示包围盒，手动模式要拿原图尺寸给画布
-    void probeItem(id);
+    probeQueue.push(() => probeItem(id));
   }
 }
 
@@ -595,16 +686,24 @@ async function handleAddFiles(): Promise<void> {
   if (files.length) addFiles(files);
 }
 
-/** 选择文件夹（批量导入待后续版本）。 */
+/** 从文件夹批量导入（扩展名过滤在主进程遍历时完成）。 */
 async function handleAddFolder(): Promise<void> {
-  const dir = await pickDirectoryApi('选择图片文件夹');
-  if (dir) message.info(`文件夹批量导入将在后续版本支持：${dir}`);
+  const before = items.value.length;
+  const files = await importFolder(config.recursive);
+  if (!files.length) return;
+  addFiles(files);
+  const added = items.value.length - before;
+  if (added) message.success(`已添加 ${added} 张图片`);
+  else message.info('这些图片已在列表中');
 }
 
 /** 清空列表。 */
 function handleClear(): void {
   items.value = [];
   checkedKeys.value = [];
+  thumbQueue.clear();
+  probeQueue.clear();
+  thumbRequested.clear();
 }
 
 /** 移除选中项。 */
@@ -765,6 +864,12 @@ async function handleStart(): Promise<void> {
     message.warning('尺寸尚未探测完成，请稍候重试');
     return;
   }
+  // 探测走限并发队列，上千项时会有一段时间只探到一部分。
+  // 此时公共画布是按「已知的那些」算的，会小于真实所需——必须等齐，否则会静默裁掉内容
+  if (config.unifySize && targets.some((i) => !i.naturalWidth || !i.naturalHeight)) {
+    message.warning('尺寸尚未探测完成，请稍候重试');
+    return;
+  }
 
   processing.value = true;
   let ok = 0;
@@ -820,6 +925,12 @@ async function handleStart(): Promise<void> {
 
   &__table {
     height: 100%;
+  }
+
+  // 「含子文件夹」只服务于旁边的「添加文件夹」，压暗一档避免与主操作抢注意力
+  &__recursive {
+    font-size: 13px;
+    color: var(--tb-text-secondary);
   }
 
   &__empty {

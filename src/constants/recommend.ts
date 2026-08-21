@@ -3,10 +3,13 @@ import {
   CropOutline,
   ColorWandOutline,
   GridOutline,
+  QrCodeOutline,
   CreateOutline,
   StatsChartOutline,
   DocumentTextOutline,
   DocumentAttachOutline,
+  VideocamOutline,
+  FilmOutline,
 } from '@vicons/ionicons5';
 import type { Component } from 'vue';
 
@@ -105,6 +108,13 @@ export const RECOMMEND_GROUPS: readonly RecommendGroup[] = [
         icon: GridOutline,
         path: '/image/sprite',
       },
+      {
+        key: 'image-qrcode',
+        label: '二维码',
+        desc: '批量生成与解析二维码',
+        icon: QrCodeOutline,
+        path: '/image/qrcode',
+      },
     ],
   },
   {
@@ -138,6 +148,26 @@ export const RECOMMEND_GROUPS: readonly RecommendGroup[] = [
         desc: '批量转换文档',
         icon: DocumentAttachOutline,
         path: '/file/pdf2word',
+      },
+    ],
+  },
+  {
+    key: 'media',
+    label: '媒体处理',
+    tools: [
+      {
+        key: 'media-video',
+        label: '视频压缩 / 转码',
+        desc: '批量压缩与格式转换',
+        icon: VideocamOutline,
+        path: '/media/video',
+      },
+      {
+        key: 'media-spine',
+        label: 'Spine 预览',
+        desc: '预览并播放骨骼动画',
+        icon: FilmOutline,
+        path: '/media/spine',
       },
     ],
   },

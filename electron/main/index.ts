@@ -5,7 +5,12 @@ import { registerWindowControlIpc } from './ipc/window';
 import { registerDialogIpc } from './ipc/dialog';
 import { registerFileIpc } from './ipc/file';
 import { registerImageIpc } from './ipc/image';
+import { registerVideoIpc } from './ipc/video';
+import { registerMediaProtocol, registerMediaScheme } from './protocol/media';
 import { APP_CHANNELS } from '../shared/channels';
+
+// 特权协议必须在 app ready 之前注册，放在模块顶层是最稳的时机
+registerMediaScheme();
 
 /** 创建主窗口。开发环境加载 dev server，生产加载打包后的 index.html。 */
 function createWindow(): void {
@@ -37,6 +42,7 @@ function createWindow(): void {
   registerDialogIpc(mainWindow);
   registerFileIpc(mainWindow);
   registerImageIpc();
+  registerVideoIpc(mainWindow);
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
@@ -47,6 +53,7 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.toolbox.app');
+  registerMediaProtocol();
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window);

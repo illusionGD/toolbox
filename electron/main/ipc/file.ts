@@ -33,10 +33,21 @@ interface WalkContext {
   dirCount: number;
   truncated: boolean;
   maxFiles: number;
+  /** 只收这些扩展名（小写不含点）；null 表示不过滤。 */
+  extensions: Set<string> | null;
   /** 上次推送进度的时间戳。 */
   lastNotify: number;
   /** 上次推送进度时的文件数。 */
   lastNotifyCount: number;
+}
+
+/**
+ * 取文件名的扩展名，小写且不含点。
+ * @param name 文件名。
+ * @returns 扩展名，无扩展名时为空串。
+ */
+function extOf(name: string): string {
+  return extname(name).replace(/^\./, '').toLowerCase();
 }
 
 /**
@@ -98,6 +109,9 @@ async function walk(
     // 符号链接不下探（可能指向目录并形成环），也不计入文件统计
     if (!entry.isFile()) continue;
 
+    // 扩展名过滤放在计数之前：maxFiles 应当是「要的文件」的上限，而不是「路过的文件」
+    if (context.extensions && !context.extensions.has(extOf(entry.name))) continue;
+
     if (context.files.length + fileNames.length >= context.maxFiles) {
       context.truncated = true;
       break;
@@ -119,7 +133,7 @@ async function walk(
           dirIndex,
           size: info.size,
           mtime: info.mtimeMs,
-          ext: extname(name).replace(/^\./, '').toLowerCase(),
+          ext: extOf(name),
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -174,6 +188,9 @@ async function scanDirectory(win: BrowserWindow, options: ScanOptions): Promise<
     dirCount: 0,
     truncated: false,
     maxFiles: options.maxFiles && options.maxFiles > 0 ? options.maxFiles : DEFAULT_MAX_FILES,
+    extensions: options.extensions?.length
+      ? new Set(options.extensions.map((ext) => ext.replace(/^\./, '').toLowerCase()))
+      : null,
     lastNotify: 0,
     lastNotifyCount: 0,
   };

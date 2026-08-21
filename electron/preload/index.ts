@@ -5,6 +5,7 @@ import {
   DIALOG_CHANNELS,
   FILE_CHANNELS,
   IMAGE_CHANNELS,
+  VIDEO_CHANNELS,
   WINDOW_CHANNELS,
 } from '../shared/channels';
 import type {
@@ -17,15 +18,31 @@ import type {
   IpcResponse,
   OpenFilesOptions,
   PickedFile,
+  QrDecodeResult,
+  QrGenerateOptions,
+  QrGenerateResult,
+  QrPreviewOptions,
   RenameBatchResult,
   RenamePair,
   SaveTextOptions,
   ScanOptions,
   ScanProgress,
   ScanResult,
+  SpriteMergeOptions,
+  SpriteMergePreview,
+  SpriteMergeResult,
+  SpriteSliceOptions,
+  SpriteSliceProbe,
+  SpriteSliceProbeOptions,
+  SpriteSliceResult,
   StylizeOptions,
   StylizePreviewOptions,
   StylizeResult,
+  TranscodeOptions,
+  TranscodeResult,
+  VideoCapabilities,
+  VideoMeta,
+  VideoProgress,
 } from '../shared/types';
 
 /** 暴露给渲染进程的自定义 API。 */
@@ -201,6 +218,115 @@ const api = {
      */
     stylize: (sourcePath: string, options: StylizeOptions): Promise<IpcResponse<StylizeResult>> =>
       ipcRenderer.invoke(IMAGE_CHANNELS.stylize, sourcePath, options),
+    /**
+     * 合并多图为精灵表 + 坐标数据。
+     * @param options 合并选项。
+     * @returns 统一响应，data 为合并结果。
+     */
+    spriteMerge: (options: SpriteMergeOptions): Promise<IpcResponse<SpriteMergeResult>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.spriteMerge, options),
+    /**
+     * 合并预览（只算不写盘）。
+     * @param options 合并选项。
+     * @returns 统一响应，data 为预览 data URL 与图集尺寸。
+     */
+    spriteMergePreview: (options: SpriteMergeOptions): Promise<IpcResponse<SpriteMergePreview>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.spriteMergePreview, options),
+    /**
+     * 探测精灵表将切出的单元（只算不写盘）。
+     * @param filePath 精灵表路径。
+     * @param options 探测选项。
+     * @returns 统一响应，data 为表尺寸与切割单元。
+     */
+    spriteSliceProbe: (
+      filePath: string,
+      options: SpriteSliceProbeOptions,
+    ): Promise<IpcResponse<SpriteSliceProbe>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.spriteSliceProbe, filePath, options),
+    /**
+     * 切割精灵表为多张小图。
+     * @param filePath 精灵表路径。
+     * @param options 切割选项。
+     * @returns 统一响应，data 为切割结果。
+     */
+    spriteSlice: (
+      filePath: string,
+      options: SpriteSliceOptions,
+    ): Promise<IpcResponse<SpriteSliceResult>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.spriteSlice, filePath, options),
+    /**
+     * 批量生成二维码。
+     * @param options 生成选项。
+     * @returns 统一响应，data 为成功路径与失败数。
+     */
+    qrGenerate: (options: QrGenerateOptions): Promise<IpcResponse<QrGenerateResult>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.qrGenerate, options),
+    /**
+     * 二维码预览（只算不写盘）。
+     * @param options 预览选项。
+     * @returns 统一响应，data 为 png data URL。
+     */
+    qrPreview: (options: QrPreviewOptions): Promise<IpcResponse<string>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.qrPreview, options),
+    /**
+     * 解析单张图片的二维码。
+     * @param filePath 图片路径。
+     * @returns 统一响应，data 为解析结果。
+     */
+    qrDecode: (filePath: string): Promise<IpcResponse<QrDecodeResult>> =>
+      ipcRenderer.invoke(IMAGE_CHANNELS.qrDecode, filePath),
+  },
+
+  /** 视频处理（ffmpeg）。 */
+  video: {
+    /**
+     * 探测当前 ffmpeg 构建可用的编码器。
+     * @returns 统一响应，data 为版本与编码器集合。
+     */
+    capabilities: (): Promise<IpcResponse<VideoCapabilities>> =>
+      ipcRenderer.invoke(VIDEO_CHANNELS.capabilities),
+    /**
+     * 读取视频元信息，同时把该路径登记进 tb-media 播放白名单。
+     * @param filePath 视频路径。
+     * @returns 统一响应，data 为元信息。
+     */
+    probe: (filePath: string): Promise<IpcResponse<VideoMeta>> =>
+      ipcRenderer.invoke(VIDEO_CHANNELS.probe, filePath),
+    /**
+     * 抽一帧作缩略图。
+     * @param filePath 视频路径。
+     * @returns 统一响应，data 为 jpeg data URL。
+     */
+    thumbnail: (filePath: string): Promise<IpcResponse<string>> =>
+      ipcRenderer.invoke(VIDEO_CHANNELS.thumbnail, filePath),
+    /**
+     * 转码单个视频。
+     * @param sourcePath 源文件路径。
+     * @param options 转码选项（含 taskId，用于取消与进度关联）。
+     * @returns 统一响应，data 为转码结果。
+     */
+    transcode: (
+      sourcePath: string,
+      options: TranscodeOptions,
+    ): Promise<IpcResponse<TranscodeResult>> =>
+      ipcRenderer.invoke(VIDEO_CHANNELS.transcode, sourcePath, options),
+    /**
+     * 取消进行中的转码。
+     * @param taskId 任务 id。
+     * @returns 统一响应，data 为是否杀掉了对应进程。
+     */
+    cancel: (taskId: string): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(VIDEO_CHANNELS.cancelTranscode, taskId),
+    /**
+     * 订阅转码进度。
+     * @param callback 进度回调。
+     * @returns 取消订阅的函数。
+     */
+    onProgress: (callback: (progress: VideoProgress) => void): (() => void) => {
+      const listener = (_event: unknown, progress: VideoProgress): void => callback(progress);
+      ipcRenderer.on(VIDEO_CHANNELS.transcodeProgress, listener);
+      return () => ipcRenderer.off(VIDEO_CHANNELS.transcodeProgress, listener);
+    },
   },
 };
 

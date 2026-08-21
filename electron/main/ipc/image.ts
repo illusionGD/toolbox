@@ -1,6 +1,8 @@
 import { basename, dirname, extname, join } from 'path';
-import { readFile, stat, unlink, writeFile } from 'fs/promises';
+import { mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
 import sharp, { type Matrix3x3, type Sharp } from 'sharp';
+import QRCode from 'qrcode';
+import jsQR from 'jsqr';
 import { IMAGE_CHANNELS } from '../../shared/channels';
 import type {
   AutoCropOptions,
@@ -12,7 +14,23 @@ import type {
   CropResult,
   FormatAdvanced,
   ImageOutputFormat,
+  QrDecodeResult,
+  QrGenerateOptions,
+  QrGenerateResult,
+  QrPreviewOptions,
   RegionEffect,
+  SpriteCell,
+  SpriteDataFormat,
+  SpriteFrame,
+  SpriteGridSpec,
+  SpriteMergeOptions,
+  SpriteMergePreview,
+  SpriteMergeResult,
+  SpriteSheetPreview,
+  SpriteSliceOptions,
+  SpriteSliceProbe,
+  SpriteSliceProbeOptions,
+  SpriteSliceResult,
   StylizeEffect,
   StylizeEffects,
   StylizeOptions,
@@ -806,6 +824,806 @@ async function stylizePreview(filePath: string, options: StylizePreviewOptions):
   return `data:image/webp;base64,${buffer.toString('base64')}`;
 }
 
+/* ── 精灵图：合并 ─────────────────────────────────────────────────── */
+
+/** 合并前读入的单张图（buffer + 尺寸）。 */
+interface SpriteInput {
+  sourcePath: string;
+  name: string;
+  buffer: Buffer;
+  width: number;
+  height: number;
+}
+
+/**
+ * 读入所有待合并图片的 buffer 与尺寸。
+ * 一律 Buffer 输入（同 compressOne 的句柄铁律）。名字取文件名去扩展名，
+ * 重名时追加序号，保证坐标数据的 key 唯一。可选按内容裁掉四周透明边。
+ * @param sources 图片路径数组。
+ * @param trim 是否裁掉每张图四周的透明边。
+ * @returns 读入结果（跳过无法解码的图）。
+ */
+async function readSpriteInputs(sources: string[], trim: boolean): Promise<SpriteInput[]> {
+  const seen = new Map<string, number>();
+  const inputs: SpriteInput[] = [];
+  for (const sourcePath of sources) {
+    try {
+      let buffer = await readFile(sourcePath);
+      // 裁透明边：trim 会去掉与四角同色/透明的边，此处只对透明底有意义，
+      // 失败（全透明/纯色无边可裁）时保持原图，不阻断
+      if (trim) {
+        try {
+          buffer = await sharp(buffer).trim().png().toBuffer();
+        } catch {
+          buffer = await sharp(await readFile(sourcePath)).png().toBuffer();
+        }
+      }
+      const meta = await sharp(buffer).metadata();
+      const width = meta.width ?? 0;
+      const height = meta.height ?? 0;
+      if (width < 1 || height < 1) continue;
+      let name = basename(sourcePath, extname(sourcePath));
+      const count = seen.get(name) ?? 0;
+      seen.set(name, count + 1);
+      if (count > 0) name = `${name}_${count}`;
+      inputs.push({ sourcePath, name, buffer, width, height });
+    } catch {
+      // 无法解码的图（损坏/不支持）直接跳过，不阻断整批合并
+    }
+  }
+  return inputs;
+}
+
+/** 一张图集的布局：参与的输入 + 各帧位置 + 画布尺寸。 */
+interface SheetLayout {
+  inputs: SpriteInput[];
+  frames: SpriteFrame[];
+  width: number;
+  height: number;
+}
+
+/**
+ * 把输入分组布局成一张或多张图集。
+ *
+ * `maxSize<=0` 时全部排进一张（列数由 options.columns 或开方决定）。
+ * `maxSize>0` 时走**货架装箱**（shelf/next-fit）：逐张往当前行放，超出宽度就换行，
+ * 超出高度就开新图集。保证每张图集不超过 maxSize×maxSize。单张图超过 maxSize
+ * 也独占一张（不缩放，如实放，宽高就是它自己）。
+ * @param inputs 已读入（可能已裁边）的图片。
+ * @param options 合并选项。
+ * @returns 图集布局数组。
+ */
+function layoutSheets(inputs: SpriteInput[], options: SpriteMergeOptions): SheetLayout[] {
+  const { spacing, padding, maxSize } = options;
+  if (!inputs.length) return [];
+
+  // 不限尺寸：沿用原「每列最宽/每行最高」网格，单张
+  if (maxSize <= 0) return [layoutSingleGrid(inputs, options)];
+
+  const limit = maxSize;
+  const sheets: SheetLayout[] = [];
+  let cur: SpriteInput[] = [];
+  let frames: SpriteFrame[] = [];
+  let penX = padding; // 当前行光标 x
+  let penY = padding; // 当前行光标 y
+  let rowH = 0; // 当前行已用最大高
+  let sheetW = 0; // 当前图集实际用到的最大右边界
+
+  const flush = (): void => {
+    if (!cur.length) return;
+    sheets.push({
+      inputs: cur,
+      frames,
+      width: Math.max(1, sheetW + padding),
+      height: Math.max(1, penY + rowH + padding),
+    });
+    cur = [];
+    frames = [];
+    penX = padding;
+    penY = padding;
+    rowH = 0;
+    sheetW = 0;
+  };
+
+  for (const img of inputs) {
+    // 放不下当前行 → 换行
+    if (penX > padding && penX + img.width + padding > limit) {
+      penY += rowH + spacing;
+      penX = padding;
+      rowH = 0;
+    }
+    // 换行后仍超出高度 → 开新图集
+    if (penY > padding && penY + img.height + padding > limit) {
+      flush();
+    }
+    frames.push({
+      name: img.name,
+      sourcePath: img.sourcePath,
+      left: penX,
+      top: penY,
+      width: img.width,
+      height: img.height,
+    });
+    cur.push(img);
+    penX += img.width + spacing;
+    if (penX - spacing > sheetW) sheetW = penX - spacing;
+    if (img.height > rowH) rowH = img.height;
+  }
+  flush();
+  return sheets;
+}
+
+/**
+ * 单张网格布局：每列最宽、每行最高（maxSize 不限时用）。
+ * @param inputs 已读入的图片。
+ * @param options 合并选项（列数/间距/边距/对齐）。
+ * @returns 单张图集布局。
+ */
+function layoutSingleGrid(inputs: SpriteInput[], options: SpriteMergeOptions): SheetLayout {
+  const { spacing, padding, align } = options;
+  const count = inputs.length;
+  // 列数 <=0 时按图片数开方取近似正方形
+  const columns = options.columns > 0 ? options.columns : Math.max(1, Math.ceil(Math.sqrt(count)));
+  const rows = Math.ceil(count / columns);
+
+  // 每列最宽、每行最高
+  const colWidths = new Array<number>(columns).fill(0);
+  const rowHeights = new Array<number>(rows).fill(0);
+  inputs.forEach((img, i) => {
+    const col = i % columns;
+    const row = Math.floor(i / columns);
+    if (img.width > colWidths[col]) colWidths[col] = img.width;
+    if (img.height > rowHeights[row]) rowHeights[row] = img.height;
+  });
+
+  // 列/行的起始偏移（前缀和 + 间距 + 外边距）
+  const colX = new Array<number>(columns).fill(0);
+  for (let c = 1; c < columns; c++) colX[c] = colX[c - 1] + colWidths[c - 1] + spacing;
+  const rowY = new Array<number>(rows).fill(0);
+  for (let r = 1; r < rows; r++) rowY[r] = rowY[r - 1] + rowHeights[r - 1] + spacing;
+
+  const frames: SpriteFrame[] = inputs.map((img, i) => {
+    const col = i % columns;
+    const row = Math.floor(i / columns);
+    let left = padding + colX[col];
+    let top = padding + rowY[row];
+    // 格子比图大时按对齐方式摆放
+    if (align === 'center') {
+      left += Math.floor((colWidths[col] - img.width) / 2);
+      top += Math.floor((rowHeights[row] - img.height) / 2);
+    }
+    return { name: img.name, sourcePath: img.sourcePath, left, top, width: img.width, height: img.height };
+  });
+
+  const totalW =
+    padding * 2 + colWidths.reduce((s, w) => s + w, 0) + spacing * Math.max(0, columns - 1);
+  const totalH =
+    padding * 2 + rowHeights.reduce((s, h) => s + h, 0) + spacing * Math.max(0, rows - 1);
+  return { inputs, frames, width: totalW, height: totalH };
+}
+
+/** XML/plist 文本转义。 */
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * 把帧位置序列化成坐标数据文本。
+ * @param frames 帧位置。
+ * @param format 数据格式。
+ * @param sheetFile 精灵表文件名（含扩展名），供 JSON/plist 的 meta 引用。
+ * @param sheetSize 精灵表总尺寸。
+ * @returns 文本内容；none 时为空串。
+ */
+function serializeSpriteData(
+  frames: SpriteFrame[],
+  format: SpriteDataFormat,
+  sheetFile: string,
+  sheetSize: { width: number; height: number },
+): string {
+  if (format === 'none') return '';
+
+  if (format === 'json') {
+    // TexturePacker / PixiJS 的 hash 结构
+    const framesObj: Record<string, unknown> = {};
+    for (const f of frames) {
+      framesObj[`${f.name}.png`] = {
+        frame: { x: f.left, y: f.top, w: f.width, h: f.height },
+        rotated: false,
+        trimmed: false,
+        spriteSourceSize: { x: 0, y: 0, w: f.width, h: f.height },
+        sourceSize: { w: f.width, h: f.height },
+      };
+    }
+    const doc = {
+      frames: framesObj,
+      meta: { app: 'toolbox', image: sheetFile, size: sheetSize, scale: '1' },
+    };
+    return JSON.stringify(doc, null, 2);
+  }
+
+  if (format === 'css') {
+    // 每帧一个 class，background-position 为负偏移
+    const lines = frames.map(
+      (f) =>
+        `.sprite-${f.name} {\n` +
+        `  width: ${f.width}px;\n  height: ${f.height}px;\n` +
+        `  background: url('${sheetFile}') -${f.left}px -${f.top}px;\n}`,
+    );
+    return lines.join('\n\n') + '\n';
+  }
+
+  // plist（Cocos2d-x SpriteFrames 格式）
+  const entries = frames
+    .map(
+      (f) =>
+        `    <key>${escapeXml(f.name)}.png</key>\n` +
+        `    <dict>\n` +
+        `      <key>frame</key>\n` +
+        `      <string>{{${f.left},${f.top}},{${f.width},${f.height}}}</string>\n` +
+        `      <key>offset</key>\n      <string>{0,0}</string>\n` +
+        `      <key>rotated</key>\n      <false/>\n` +
+        `      <key>sourceSize</key>\n      <string>{${f.width},${f.height}}</string>\n` +
+        `    </dict>`,
+    )
+    .join('\n');
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n` +
+    `<plist version="1.0">\n<dict>\n` +
+    `  <key>frames</key>\n  <dict>\n${entries}\n  </dict>\n` +
+    `  <key>metadata</key>\n  <dict>\n` +
+    `    <key>format</key>\n    <integer>2</integer>\n` +
+    `    <key>realTextureFileName</key>\n    <string>${escapeXml(sheetFile)}</string>\n` +
+    `    <key>size</key>\n    <string>{${sheetSize.width},${sheetSize.height}}</string>\n` +
+    `    <key>textureFileName</key>\n    <string>${escapeXml(sheetFile)}</string>\n` +
+    `  </dict>\n</dict>\n</plist>\n`
+  );
+}
+
+/** 坐标数据格式 → 文件扩展名。 */
+const SPRITE_DATA_EXT: Record<Exclude<SpriteDataFormat, 'none'>, string> = {
+  json: 'json',
+  css: 'css',
+  plist: 'plist',
+};
+
+/** 把一张图集布局 composite 成图片 buffer（透明底 + 各帧叠加）。 */
+async function renderSheet(layout: SheetLayout, format: ResolvedFormat, quality: number): Promise<Buffer> {
+  const composites = layout.frames.map((f, i) => ({
+    input: layout.inputs[i].buffer,
+    left: f.left,
+    top: f.top,
+  }));
+  const sheet = sharp({
+    create: {
+      width: layout.width,
+      height: layout.height,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  }).composite(composites);
+  return applyFormat(sheet, format, quality).toBuffer();
+}
+
+/**
+ * 合并多图为精灵表 + 坐标数据。
+ *
+ * composite 用 buffer 输入（同全仓库的 libvips 句柄铁律）；底图用 create 造一张
+ * 透明画布，各帧按布局坐标叠加。坐标数据由布局结果直接生成，与像素位置一致。
+ * maxSize>0 时放不下会拆成多张图集，文件名带序号，坐标数据每张各一份。
+ * @param options 合并选项。
+ * @returns 合并结果（可能多张）。
+ */
+async function mergeSprites(options: SpriteMergeOptions): Promise<SpriteMergeResult> {
+  const inputs = await readSpriteInputs(options.sources, options.trim);
+  if (!inputs.length) throw new Error('没有可合并的有效图片');
+
+  const layouts = layoutSheets(inputs, options);
+  const multi = layouts.length > 1;
+  const sheetPaths: string[] = [];
+  const dataPaths: string[] = [];
+  let frameCount = 0;
+
+  for (let s = 0; s < layouts.length; s++) {
+    const layout = layouts[s];
+    frameCount += layout.frames.length;
+    // 多张时文件名加 _0/_1 序号，单张保持原名
+    const base = multi ? `${options.baseName}_${s}` : options.baseName;
+    const sheetFile = `${base}.${FORMAT_EXT[options.format]}`;
+    const sheetPath = join(options.outputDir, sheetFile);
+    await writeFile(sheetPath, await renderSheet(layout, options.format, options.quality));
+    sheetPaths.push(sheetPath);
+
+    if (options.dataFormat !== 'none') {
+      const text = serializeSpriteData(layout.frames, options.dataFormat, sheetFile, {
+        width: layout.width,
+        height: layout.height,
+      });
+      const dataPath = join(options.outputDir, `${base}.${SPRITE_DATA_EXT[options.dataFormat]}`);
+      await writeFile(dataPath, text, 'utf8');
+      dataPaths.push(dataPath);
+    }
+  }
+
+  return { sheetPaths, dataPaths, frameCount, sheetCount: layouts.length };
+}
+
+/** 预览的长边上限：过大图集缩到这个尺寸内回传，省内存也够看清排布。 */
+const SPRITE_PREVIEW_MAX = 1200;
+
+/**
+ * 合并预览（只算不写盘）：按当前布局合出每张图集，缩到上限内回传 data URL。
+ * 复用 `readSpriteInputs` + `layoutSheets` + composite，与实际合并同一套布局，所见即所得。
+ * @param options 合并选项。
+ * @returns 各图集预览与总帧数。
+ */
+async function spriteMergePreview(options: SpriteMergeOptions): Promise<SpriteMergePreview> {
+  const inputs = await readSpriteInputs(options.sources, options.trim);
+  if (!inputs.length) throw new Error('没有可合并的有效图片');
+
+  const layouts = layoutSheets(inputs, options);
+  const sheets: SpriteSheetPreview[] = [];
+  let frameCount = 0;
+
+  for (const layout of layouts) {
+    frameCount += layout.frames.length;
+    let sheet = sharp({
+      create: {
+        width: layout.width,
+        height: layout.height,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    }).composite(
+      layout.frames.map((f, i) => ({ input: layout.inputs[i].buffer, left: f.left, top: f.top })),
+    );
+
+    // 大图集缩到长边 SPRITE_PREVIEW_MAX 内（仅缩小），预览用 webp 省体积
+    const longEdge = Math.max(layout.width, layout.height);
+    if (longEdge > SPRITE_PREVIEW_MAX) {
+      // composite 后需先出 buffer 再缩，链上直接 resize 会对 create 的空画布生效而非合成结果
+      const merged = await sheet.png().toBuffer();
+      sheet = sharp(merged).resize({
+        width: Math.round((layout.width / longEdge) * SPRITE_PREVIEW_MAX),
+        withoutEnlargement: true,
+      });
+    }
+
+    const buffer = await sheet.webp({ quality: 80 }).toBuffer();
+    sheets.push({
+      dataUrl: `data:image/webp;base64,${buffer.toString('base64')}`,
+      width: layout.width,
+      height: layout.height,
+      frameCount: layout.frames.length,
+    });
+  }
+
+  return { sheets, frameCount };
+}
+
+/* ── 精灵图：切割 ─────────────────────────────────────────────────── */
+
+/**
+ * 固定网格切割：按行列数或单元尺寸等分。
+ * @param spec 网格参数。
+ * @param width 表宽。
+ * @param height 表高。
+ * @returns 切割单元。
+ */
+function cellsFromGrid(spec: SpriteGridSpec, width: number, height: number): SpriteCell[] {
+  const { spacing, margin } = spec;
+  const usableW = width - margin * 2;
+  const usableH = height - margin * 2;
+  const cells: SpriteCell[] = [];
+
+  // 按数量分：整图等分成 cols×rows，每格尺寸由此反算（能整除时无余量）
+  if (spec.columns > 0 && spec.rows > 0) {
+    const cols = spec.columns;
+    const rows = spec.rows;
+    const cellW = Math.floor((usableW - spacing * (cols - 1)) / cols);
+    const cellH = Math.floor((usableH - spacing * (rows - 1)) / rows);
+    if (cols < 1 || rows < 1 || cellW < 1 || cellH < 1) return cells;
+    let n = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        cells.push({
+          rect: {
+            left: margin + c * (cellW + spacing),
+            top: margin + r * (cellH + spacing),
+            width: cellW,
+            height: cellH,
+          },
+          name: `sprite_${String(n).padStart(3, '0')}`,
+        });
+        n++;
+      }
+    }
+    return cells;
+  }
+
+  // 按单元固定宽高：从 margin 起以「宽/高 + 间距」为步长铺满，
+  // **最后一格若不足一个单元，也保留并裁到图片边缘**（不丢余量），
+  // 这样宽高不是单元尺寸整数倍时，边角剩余区域仍能切出来。
+  const cellW = spec.cellWidth;
+  const cellH = spec.cellHeight;
+  if (cellW < 1 || cellH < 1) return cells;
+  let n = 0;
+  for (let top = margin; top < height - margin; top += cellH + spacing) {
+    const h = Math.min(cellH, height - margin - top);
+    if (h < 1) break;
+    for (let left = margin; left < width - margin; left += cellW + spacing) {
+      const w = Math.min(cellW, width - margin - left);
+      if (w < 1) break;
+      cells.push({
+        rect: { left, top, width: w, height: h },
+        name: `sprite_${String(n).padStart(3, '0')}`,
+      });
+      n++;
+    }
+  }
+  return cells;
+}
+
+/**
+ * 按切割线位置切成不等分网格。
+ * @param columnsAt 纵向切割线 x 坐标。
+ * @param rowsAt 横向切割线 y 坐标。
+ * @param width 表宽。
+ * @param height 表高。
+ * @returns 切割单元。
+ */
+function cellsFromLines(
+  columnsAt: number[],
+  rowsAt: number[],
+  width: number,
+  height: number,
+): SpriteCell[] {
+  // 切割线两端补上 0 与边界，排序去重后相邻两条构成一段
+  const xs = [...new Set([0, ...columnsAt, width])].sort((a, b) => a - b);
+  const ys = [...new Set([0, ...rowsAt, height])].sort((a, b) => a - b);
+  const cells: SpriteCell[] = [];
+  let n = 0;
+  for (let r = 0; r < ys.length - 1; r++) {
+    for (let c = 0; c < xs.length - 1; c++) {
+      const left = xs[c];
+      const top = ys[r];
+      const w = xs[c + 1] - left;
+      const h = ys[r + 1] - top;
+      if (w < 1 || h < 1) continue;
+      cells.push({
+        rect: { left, top, width: w, height: h },
+        name: `sprite_${String(n).padStart(3, '0')}`,
+      });
+      n++;
+    }
+  }
+  return cells;
+}
+
+/**
+ * 解析已有坐标文件（JSON / plist）为切割单元。
+ * @param dataPath 坐标文件路径。
+ * @returns 切割单元。
+ */
+async function cellsFromImport(dataPath: string): Promise<SpriteCell[]> {
+  const text = await readFile(dataPath, 'utf8');
+  const ext = extname(dataPath).toLowerCase();
+  const cells: SpriteCell[] = [];
+
+  if (ext === '.json') {
+    const doc = JSON.parse(text) as { frames?: Record<string, { frame?: CropRect | { x: number; y: number; w: number; h: number } }> };
+    const framesObj = doc.frames ?? {};
+    for (const [key, value] of Object.entries(framesObj)) {
+      const frame = value.frame as { x: number; y: number; w: number; h: number } | undefined;
+      if (!frame) continue;
+      cells.push({
+        rect: { left: frame.x, top: frame.y, width: frame.w, height: frame.h },
+        name: basename(key, extname(key)),
+      });
+    }
+    return cells;
+  }
+
+  // plist：<key>name.png</key>...<key>frame</key><string>{{x,y},{w,h}}</string>
+  // 帧名一律带扩展名（hero.png），要求捕获含点，才不会把外层容器 <key>frames</key>
+  // / <key>metadata</key> 误当成帧名
+  const blockRe =
+    /<key>([^<]+\.[A-Za-z0-9]+)<\/key>\s*<dict>[\s\S]*?<key>frame<\/key>\s*<string>\{\{(-?\d+),(-?\d+)\},\{(\d+),(\d+)\}\}<\/string>/g;
+  let m: RegExpExecArray | null;
+  while ((m = blockRe.exec(text)) !== null) {
+    cells.push({
+      rect: { left: Number(m[2]), top: Number(m[3]), width: Number(m[4]), height: Number(m[5]) },
+      name: basename(m[1], extname(m[1])),
+    });
+  }
+  return cells;
+}
+
+/**
+ * 按透明像素连通域自动圈出每个精灵的包围盒。
+ *
+ * 读 raw 像素（ensureAlpha 保证 4 通道），alpha 大于阈值视为不透明，
+ * 对不透明像素做 4 邻接连通域（并查集），每个连通块取包围盒。
+ * 用行缓冲的两趟并查集，避免为百万像素递归 flood-fill 爆栈。
+ * @param input 精灵表 buffer。
+ * @param alphaThreshold alpha 阈值 0-255。
+ * @param minArea 最小连通块面积（滤噪点）。
+ * @returns 切割单元（按从上到下、从左到右排序）。
+ */
+async function cellsFromAuto(
+  input: Buffer,
+  alphaThreshold: number,
+  minArea: number,
+): Promise<SpriteCell[]> {
+  const { data, info } = await sharp(input)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+
+  // 并查集：label[i] 指向父节点；-1 表示透明（背景）
+  const label = new Int32Array(width * height).fill(-1);
+  const parent: number[] = [];
+  const find = (x: number): number => {
+    let root = x;
+    while (parent[root] !== root) root = parent[root];
+    while (parent[x] !== root) {
+      const next = parent[x];
+      parent[x] = root;
+      x = next;
+    }
+    return root;
+  };
+  const union = (a: number, b: number): void => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
+  };
+
+  const opaque = (px: number, py: number): boolean => {
+    const idx = (py * width + px) * channels + (channels - 1);
+    return data[idx] > alphaThreshold;
+  };
+
+  // 第一趟：给不透明像素分配标签，与左/上邻居合并
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (!opaque(x, y)) continue;
+      const i = y * width + x;
+      const left = x > 0 && opaque(x - 1, y) ? label[i - 1] : -1;
+      const up = y > 0 && opaque(x, y - 1) ? label[i - width] : -1;
+      if (left === -1 && up === -1) {
+        const id = parent.length;
+        parent.push(id);
+        label[i] = id;
+      } else if (left !== -1 && up !== -1) {
+        label[i] = left;
+        union(left, up);
+      } else {
+        label[i] = left !== -1 ? left : up;
+      }
+    }
+  }
+
+  // 第二趟：按根标签聚包围盒
+  const boxes = new Map<number, { minX: number; minY: number; maxX: number; maxY: number; area: number }>();
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (label[i] === -1) continue;
+      const root = find(label[i]);
+      const box = boxes.get(root);
+      if (!box) {
+        boxes.set(root, { minX: x, minY: y, maxX: x, maxY: y, area: 1 });
+      } else {
+        if (x < box.minX) box.minX = x;
+        if (y < box.minY) box.minY = y;
+        if (x > box.maxX) box.maxX = x;
+        if (y > box.maxY) box.maxY = y;
+        box.area++;
+      }
+    }
+  }
+
+  const cells = [...boxes.values()]
+    .filter((b) => b.area >= minArea)
+    .map((b) => ({
+      rect: { left: b.minX, top: b.minY, width: b.maxX - b.minX + 1, height: b.maxY - b.minY + 1 },
+    }))
+    // 从上到下、从左到右排序，命名才稳定
+    .sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left)
+    .map((c, n) => ({ rect: c.rect, name: `sprite_${String(n).padStart(3, '0')}` }));
+  return cells;
+}
+
+/**
+ * 探测精灵表将切出的单元（只算不写盘）。
+ * @param filePath 精灵表路径。
+ * @param options 探测选项。
+ * @returns 表尺寸与切割单元。
+ */
+async function spriteSliceProbe(
+  filePath: string,
+  options: SpriteSliceProbeOptions,
+): Promise<SpriteSliceProbe> {
+  const input = await readFile(filePath);
+  const meta = await sharp(input).metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+
+  let cells: SpriteCell[] = [];
+  switch (options.method) {
+    case 'grid':
+      if (options.grid) cells = cellsFromGrid(options.grid, width, height);
+      break;
+    case 'lines':
+      cells = cellsFromLines(options.columnsAt ?? [], options.rowsAt ?? [], width, height);
+      break;
+    case 'import':
+      if (options.dataPath) cells = await cellsFromImport(options.dataPath);
+      break;
+    case 'auto':
+      cells = await cellsFromAuto(input, options.alphaThreshold ?? 0, options.minArea ?? 1);
+      break;
+  }
+  return { width, height, cells };
+}
+
+/**
+ * 切割精灵表为多张小图。
+ * 每个单元 clampRect 后 extract；非法单元（越界/零面积）跳过并计数。
+ * @param filePath 精灵表路径。
+ * @param options 切割选项。
+ * @returns 输出路径与跳过数。
+ */
+async function spriteSlice(
+  filePath: string,
+  options: SpriteSliceOptions,
+): Promise<SpriteSliceResult> {
+  const input = await readFile(filePath);
+  const meta = await sharp(input).metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+
+  const outputPaths: string[] = [];
+  let skipped = 0;
+  const usedNames = new Map<string, number>();
+
+  for (const cell of options.cells) {
+    const safe = clampRect(cell.rect, width, height);
+    if (!safe) {
+      skipped++;
+      continue;
+    }
+    // extract 每次用新 sharp 实例，避免链式 extract 叠加坐标
+    const buffer = await applyFormat(
+      sharp(input).extract(safe),
+      options.format,
+      options.quality,
+    ).toBuffer();
+
+    // 名字去重：同名追加序号
+    let name = cell.name || 'sprite';
+    const count = usedNames.get(name) ?? 0;
+    usedNames.set(name, count + 1);
+    if (count > 0) name = `${name}_${count}`;
+
+    const outputPath = join(options.outputDir, `${name}.${FORMAT_EXT[options.format]}`);
+    await writeFile(outputPath, buffer);
+    outputPaths.push(outputPath);
+  }
+
+  return { outputPaths, skipped };
+}
+
+/* ── 二维码：生成 / 预览 / 解析 ───────────────────────────────────── */
+
+/** 容错级别透传给 qrcode（类型一致，单列一层便于校验）。 */
+type QrLevel = 'L' | 'M' | 'Q' | 'H';
+
+/**
+ * 批量生成二维码。
+ *
+ * png/jpg 走 `QRCode.toBuffer`（jpg 再经 sharp 转码，qrcode 只出 png）；
+ * svg 走 `QRCode.toString` 写文本。文件名由渲染进程定好（模板/序号/手改），
+ * 这里只做重名去重与落盘。单条失败（内容超容量等）计入 failed，不中断整批。
+ * @param options 生成选项。
+ * @returns 成功路径与失败数。
+ */
+async function generateQrCodes(options: QrGenerateOptions): Promise<QrGenerateResult> {
+  const { items, size, margin, level, dark, light, format, outputDir } = options;
+  const outputPaths: string[] = [];
+  let failed = 0;
+  const usedNames = new Map<string, number>();
+
+  // 目录可能是用户手填的、尚不存在的路径，先建好（recursive 幂等），
+  // 否则 writeFile 报一句 ENOENT 用户看不出是目录没建
+  await mkdir(outputDir, { recursive: true });
+
+  for (const item of items) {
+    if (!item.text) {
+      failed += 1;
+      continue;
+    }
+    // 重名去重：同名追加序号
+    let name = item.name || 'qr';
+    const count = usedNames.get(name) ?? 0;
+    usedNames.set(name, count + 1);
+    if (count > 0) name = `${name}_${count}`;
+
+    try {
+      const common = {
+        margin,
+        errorCorrectionLevel: level as QrLevel,
+        color: { dark, light },
+      };
+      if (format === 'svg') {
+        const svg = await QRCode.toString(item.text, { type: 'svg', ...common });
+        const outputPath = join(outputDir, `${name}.svg`);
+        await writeFile(outputPath, svg, 'utf8');
+        outputPaths.push(outputPath);
+      } else {
+        const png = await QRCode.toBuffer(item.text, { type: 'png', width: size, ...common });
+        const outputPath = join(outputDir, `${name}.${format === 'jpg' ? 'jpg' : 'png'}`);
+        // qrcode 只出 png，jpg 用 sharp 转码（flatten 到 light 底色，jpg 无透明）
+        const buffer = format === 'jpg' ? await sharp(png).flatten({ background: light }).jpeg().toBuffer() : png;
+        await writeFile(outputPath, buffer);
+        outputPaths.push(outputPath);
+      }
+    } catch {
+      // 内容超出二维码容量、颜色非法等：计失败，继续下一条
+      failed += 1;
+    }
+  }
+
+  return { outputPaths, failed };
+}
+
+/**
+ * 生成二维码预览 data URL（只算不写盘）。
+ * @param options 预览选项。
+ * @returns png data URL。
+ */
+async function generateQrPreview(options: QrPreviewOptions): Promise<string> {
+  const png = await QRCode.toBuffer(options.text || ' ', {
+    type: 'png',
+    width: options.size,
+    margin: options.margin,
+    errorCorrectionLevel: options.level as QrLevel,
+    color: { dark: options.dark, light: options.light },
+  });
+  return `data:image/png;base64,${png.toString('base64')}`;
+}
+
+/**
+ * 解析单张图片的二维码。
+ *
+ * Buffer 输入铁律；`ensureAlpha().raw()` 出 RGBA 平面喂 jsQR。识别不到返回 ok:false
+ * 而非抛错（列表里每张都要有结果行）。
+ * @param filePath 图片路径。
+ * @returns 解析结果。
+ */
+async function decodeQrCode(filePath: string): Promise<QrDecodeResult> {
+  const name = basename(filePath);
+  try {
+    const input = await readFile(filePath);
+    const { data, info } = await sharp(input)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const result = jsQR(new Uint8ClampedArray(data), info.width, info.height);
+    return { path: filePath, name, text: result ? result.data : null, ok: !!result };
+  } catch {
+    // 解码失败（损坏/不支持）当作未识别，不抛
+    return { path: filePath, name, text: null, ok: false };
+  }
+}
+
 /** 注册图片处理相关 IPC。 */
 export function registerImageIpc(): void {
   handle(IMAGE_CHANNELS.thumbnail, (_e, filePath: string) => makeThumbnail(filePath));
@@ -825,4 +1643,17 @@ export function registerImageIpc(): void {
   handle(IMAGE_CHANNELS.stylize, (_e, sourcePath: string, options: StylizeOptions) =>
     stylizeOne(sourcePath, options),
   );
+  handle(IMAGE_CHANNELS.spriteMerge, (_e, options: SpriteMergeOptions) => mergeSprites(options));
+  handle(IMAGE_CHANNELS.spriteMergePreview, (_e, options: SpriteMergeOptions) =>
+    spriteMergePreview(options),
+  );
+  handle(IMAGE_CHANNELS.spriteSliceProbe, (_e, filePath: string, options: SpriteSliceProbeOptions) =>
+    spriteSliceProbe(filePath, options),
+  );
+  handle(IMAGE_CHANNELS.spriteSlice, (_e, filePath: string, options: SpriteSliceOptions) =>
+    spriteSlice(filePath, options),
+  );
+  handle(IMAGE_CHANNELS.qrGenerate, (_e, options: QrGenerateOptions) => generateQrCodes(options));
+  handle(IMAGE_CHANNELS.qrPreview, (_e, options: QrPreviewOptions) => generateQrPreview(options));
+  handle(IMAGE_CHANNELS.qrDecode, (_e, filePath: string) => decodeQrCode(filePath));
 }

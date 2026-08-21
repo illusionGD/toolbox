@@ -10,9 +10,12 @@ import PlaceholderView from '@/views/PlaceholderView.vue';
 import ImageCompressView from '@/views/image/ImageCompressView.vue';
 import ImageCropView from '@/views/image/ImageCropView.vue';
 import ImageStylizeView from '@/views/image/ImageStylizeView.vue';
+import ImageSpriteView from '@/views/image/ImageSpriteView.vue';
+import QrCodeView from '@/views/image/QrCodeView.vue';
 import FileStatsView from '@/views/file/FileStatsView.vue';
 import RenameView from '@/views/file/RenameView.vue';
 import SpinePreviewView from '@/views/media/SpinePreviewView.vue';
+import VideoCompressView from '@/views/media/VideoCompressView.vue';
 
 /**
  * 已实现工具的 key → 页面组件映射。
@@ -22,9 +25,12 @@ const TOOL_COMPONENTS: Record<string, Component> = {
   'image-compress': ImageCompressView,
   'image-crop': ImageCropView,
   'image-stylize': ImageStylizeView,
+  'image-sprite': ImageSpriteView,
+  'image-qrcode': QrCodeView,
   'file-stats': FileStatsView,
   'file-rename': RenameView,
   'media-spine': SpinePreviewView,
+  'media-video': VideoCompressView,
 };
 
 /**
