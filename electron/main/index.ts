@@ -23,6 +23,8 @@ function createWindow(): void {
     frame: false,
     transparent: true,
     autoHideMenuBar: true,
+    // 任务栏/窗口图标：用 renderer 产物里的 icon.png（来自 public/icon.png），dev/prod 路径一致
+    icon: join(__dirname, '../renderer/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,

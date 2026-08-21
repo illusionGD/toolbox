@@ -1,0 +1,26 @@
+appId: com.toolbox.app
+productName: Toolbox
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# 原生模块与二进制必须解包，否则 asar 内的 .node 无法加载、.exe 无法 spawn
+asarUnpack:
+  - node_modules/sharp/**
+  - node_modules/@img/**
+  - node_modules/@ffmpeg-installer/**
+  - node_modules/@ffprobe-installer/**
+win:
+  icon: build/icon.png
+  target:
+    - nsis
+    - portable
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  # 不做自动更新，关掉差分包（不生成 .blockmap）
+  differentialPackage: false
