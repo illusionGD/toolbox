@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { stat } from 'fs/promises';
 import { FFPROBE_PATH } from './binary';
 import { runFfmpegToBuffer } from './run';
-import type { VideoMeta, VideoStreamInfo } from '../../shared/types';
+import type { AudioMeta, VideoMeta, VideoStreamInfo } from '../../shared/types';
 
 /**
  * ffprobe 元信息读取与抽帧。
@@ -100,6 +100,30 @@ export async function probeVideo(filePath: string): Promise<VideoMeta> {
     size: fileStat.size,
     video: video ? toStreamInfo(video) : null,
     audio: audio ? toStreamInfo(audio) : null,
+  };
+}
+
+/**
+ * 读取音频元信息。
+ *
+ * 复用 probeVideo 的那一次 ffprobe 调用后投影，而不是另写一份解析：ffprobe
+ * `-show_streams` 一次就把音视频流全带回来了，分两套解析只会让两边漂移。
+ * 码率取流码率，缺失时退回容器总码率——wav 这类容器不给流码率，但页面要显示。
+ * @param filePath 音频（或含音轨的视频）文件绝对路径。
+ * @returns 音频元信息。
+ * @throws ffprobe 失败或文件无任何媒体流时抛出。
+ */
+export async function probeAudio(filePath: string): Promise<AudioMeta> {
+  const meta = await probeVideo(filePath);
+  return {
+    duration: meta.duration,
+    container: meta.container,
+    size: meta.size,
+    codec: meta.audio?.codec ?? '',
+    channels: meta.audio?.channels ?? 0,
+    sampleRate: meta.audio?.sampleRate ?? 0,
+    bitrate: meta.audio?.bitrate || meta.bitrate,
+    hasVideo: meta.video !== null,
   };
 }
 

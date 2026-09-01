@@ -257,7 +257,11 @@
         <div class="bmf__field">
           <label class="bmf__label">输出目录</label>
           <div class="bmf__dir">
-            <n-input v-model:value="fontConfig.outputDir" size="small" placeholder="选择输出目录" />
+            <n-input
+              v-model:value="fontConfig.outputDir"
+              size="small"
+              placeholder="选择或粘贴输出目录"
+            />
             <n-button size="small" @click="pickFontOutputDir">
               <n-icon :component="FolderOpenOutline" />
             </n-button>
@@ -334,7 +338,11 @@
         <div class="bmf__field">
           <label class="bmf__label">输出目录</label>
           <div class="bmf__dir">
-            <n-input v-model:value="imgConfig.outputDir" size="small" placeholder="选择输出目录" />
+            <n-input
+              v-model:value="imgConfig.outputDir"
+              size="small"
+              placeholder="选择或粘贴输出目录"
+            />
             <n-button size="small" @click="pickImgOutputDir">
               <n-icon :component="FolderOpenOutline" />
             </n-button>

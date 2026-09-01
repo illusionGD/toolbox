@@ -21,6 +21,7 @@ import FontConvertView from '@/views/font/FontConvertView.vue';
 import BitmapFontView from '@/views/font/BitmapFontView.vue';
 import SpinePreviewView from '@/views/media/SpinePreviewView.vue';
 import VideoCompressView from '@/views/media/VideoCompressView.vue';
+import AudioView from '@/views/media/AudioView.vue';
 
 /**
  * 已实现工具的 key → 页面组件映射。
@@ -41,6 +42,7 @@ const TOOL_COMPONENTS: Record<string, Component> = {
   'font-bitmap': BitmapFontView,
   'media-spine': SpinePreviewView,
   'media-video': VideoCompressView,
+  'media-audio': AudioView,
 };
 
 /**

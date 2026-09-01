@@ -190,7 +190,7 @@
             <n-input
               v-model:value="genConfig.outputDir"
               size="small"
-              placeholder="粘贴或选择输出目录"
+              placeholder="选择或粘贴输出目录"
               :status="outputDirStatus"
             />
             <n-button size="small" @click="pickGenDir"

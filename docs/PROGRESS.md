@@ -3,14 +3,14 @@
 > 配合 [PLAN.md](./PLAN.md) 使用。PLAN 定"做什么、什么优先级"，本文件跟踪"做到哪、卡在哪"。
 > 状态图例：⬜ 未开始 · 🟡 进行中 · 🔵 待 review · ✅ 已完成 · ⛔ 卡住 · ⏸ 暂缓
 
-**最后更新**：2026-08-31
+**最后更新**：2026-09-01
 
 ---
 
 ## 当前进展
 
-- **当前任务**：位图字体（#18）🔵 待 review —— 双 tab 页 `/font/bitmap`，fontkit 取字形 + sharp 整页 SVG 栅格化出 PNG 图集 + .fnt/.xml/.json，已配 skill。**P3 字体工具四项至此全部做完**。
-- **下一步**：可选 #20 音频工具（复用 ffmpeg）、#21 host 工具。待用户定。
+- **当前任务**：无 —— #20 音频工具 review 通过（含修掉 review 时抓到的两个 bug：14 处输出目录输入框有 7 个是单向绑定改不了、剪切 `trim` 传响应式 Proxy 导致 "An object could not be cloned"）。**P4 媒体工具至此全部做完，P0–P4 已无未开工项**。
+- **下一步**：待用户定。候选：P5 #21 host 工具（唯一还没动的 PLAN 项，要处理管理员权限）/ 把 #19 已在主进程实现但未接 UI 的 `trim`+`crop` 做成视频剪切页（现在有 #20 的波形选区可参照）/ 补 #15 遗留的「每个 sheet 各出一套 JSON」。
 - **待人工验**：#18 的图集观感只有人能判断 —— 生成后把 `.fnt` + PNG 丢进 Pixi 或在线 BMFont 查看器确认渲染正确。
 
 ---
@@ -62,7 +62,7 @@
 | # | 功能 | 状态 | skill | 备注 |
 |---|------|------|-------|------|
 | 19 | 视频压缩 / 转码（ffmpeg） | 🔵 | ✅ | CRF/码率/目标大小 + 缩放降帧 + 音频 + GIF 两趟调色板 + tb-media 流式预览；trim/crop 已在主进程预留未接 UI |
-| 20 | 音频工具（压缩/转码/裁剪/预览） | ⬜ | ⬜ | |
+| 20 | 音频工具（压缩/转码/裁剪/预览） | ✅ | ✅ | review 通过；双 tab：批量转码（**并发 4**，实测 3.74×）+ 剪切/分割（波形选区 / 按静音 / 平均分段）；响度归一 + 音量 + 淡入淡出 + 声道采样率 |
 | S | Spine 预览（Pixi v8 + spine 4.2） | 🔵 | ✅ | 用户插队优先做 |
 
 ### P5 · 网络工具及其他 — M6
@@ -115,6 +115,7 @@
 **媒体工具**
 - `2026-07-18` Spine 预览（插队）：Pixi v8 + spine-pixi-v8 4.2，原生 File+objectURL 渲染进程加载不经 IPC，CSP 加 blob:。见 skill spine-preview。
 - `2026-08-21` **#19 视频压缩/转码**：ffmpeg（`@ffmpeg-installer`/`@ffprobe-installer` 打包，asarUnpack）。与 sharp 根本不同——外部子进程：argv 数组传参（绕开中文/空格路径引号问题）、`-progress` 管道节流进度（百分比只许前进、时长未知推 -1）、取消要真杀进程（GIF 两趟共用 taskId 靠 canceledTasks 拦趟间取消）、**一律临时文件 + 成功才 rename**（ffmpeg 不能读写同一文件、坏输出要删）。**必须探测真实编码器能力**（打包 4.1 构建 ≠ 文档）。pre-flight 拦注定失败的组合（copy 与滤镜互斥、容器装不下的流）。scale 用 `-2` 保偶数宽、VP9 需 `-b:v 0` + row-mt、mp4 加 faststart、GIF 两趟 palettegen。**tb-media 自定义特权协议**播放本地文件（file:// 被开发环境 Chromium 拦）：白名单为唯一安全边界、必须实现 Range 流式（否则进度条拖不动、大文件爆内存）。**处理严格串行**（单 ffmpeg 吃满全核，并发只抢 CPU，硬约束）。onUnmounted 杀在跑进程。`trim`/`crop` 已在主进程实现但未接 UI，为下一轮时间剪切/画面裁剪页预留共用 `transcodeOne`。见 skill video-compress。
+- `2026-09-01` **#20 音频工具**（双 tab 页 `/media/audio`，媒体工具收官）：**零新依赖**，ffmpeg 二进制 / `runFfmpeg` 系列 / `tb-media` 协议 / 能力探测全部复用 #19；主进程独立成 `ipc/audio.ts` 不并进 449 行的 video.ts（那边整个文件都是视频语义）。**最重要的一条推翻了从视频页照搬的默认做法：本页并发 4，与视频页的严格串行相反** —— 音频编码是单进程单线程（同一个十分钟文件 `-threads 1` 用 10718ms、`-threads 8` 用 10693ms **完全相同**），故四进程并行实测 **3.74×**（10 分钟 mp3 320k 串行 44733ms → 并行 11975ms；flac lvl12 22708→6038ms）。视频页注释里「单 ffmpeg 吃满全核、并发只抢 CPU」对视频成立、**对音频不成立**，两处都写了警告防下一轮改回串行；渲染进程随之把「当前唯一 currentTaskId」改成 `Set<taskId>`，取消要杀全部。**兼容矩阵放 `electron/shared/audio.ts` 两端共用**（主进程 pre-flight 拦 + 渲染进程过滤下拉，各存一份必然漂移成「下拉里能选、点下去报错」；渲染进程能 import shared 的运行时值，先例是 services/ipc.ts 的 IPC_CODE），8×8 实测非文档，两个反直觉：**wav 能装 mp3/aac/vorbis/flac 有损流**、**ogg 与 opus 两容器可互装**；用流编码名而非编码器名（实测编码器×容器与源编码×容器两张矩阵结构完全一致，合成一张 + ENCODER_CODEC 换算，`-c:a copy` 也查同一张）。**`-vn` 的规划记录被实测推翻并纠正**：原记「忘了 -vn 也能出 mp3 但码率被压到 64k」——那 67407 是视频+音频 m4a 的**容器平均码率**，真相更糟：能装视频的容器会把视频流**一起重新编码**进产物（实测 m4a→libx264、flac→png 附图、ogg→theora），30s 720p 转 m4a 683125B/1434ms vs 加 -vn 的 220107B/660ms；**mp3 与 wav 装不了视频会自动丢掉、完全看不出问题**，所以这坑只在换到 m4a/flac/ogg 时才炸。pre-flight 三条实测：**libopus 显式给非 48kHz 直接报错退出**（不给 -ar 时它自己静默重采样到 48k，那是允许的，故只拦显式指定；前端更进一步只留「保持源/48000」）、容器×编码查表、**`-c:a copy` 与滤镜/声道/采样率互斥且不能悄悄忽略**（用户开了响度归一却拿到原样文件比报错更糟，文案列出具体冲突项）。滤镜链 **`volume`→`loudnorm`→`afade` 顺序不能调**：归一在增益后否则手调增益被整个抵消；**afade 最后且淡出起点按剪切后时长算**（实测 `-ss` 放 `-i` 前时滤镜时间轴从 0 重新开始，剪 2–5s 的产物里 st=2 的淡出落在末段：末段 RMS −31.3dB vs 中段 −24.1dB）。**响度归一单趟就够**：源 −21.87 LUFS 单趟得 −16.02（目标 −16）、双趟 −16.07，**双趟反而略差还多跑一遍**。**剪切精度如实回报不假装精确**：要 3.000s 时 wav 得 **3.000（0 误差）**、mp3 重编码 3.030、mp3 copy 3.056，`-ss` 放 `-i` 前后精度**完全相同**（音频没有关键帧问题）但放前面不解码整条快得多。其余实测：不给 `-f` 时十种扩展名推断全部正确；flac wav→flac→wav md5 完全相同但 **level 12 比 5 慢 48% 只多省 1.5%**（默认 5）；silencedetect 精度约 15ms 且**文件以静音结尾时不输出收尾的 silence_end**（要用 duration 补上，否则末段静音整个漏掉）；**波形图成本与时长尺寸几乎无关**（十分钟 1200×80 用 277ms、2400×120 用 287ms）故不缓存不落盘、`runFfmpegToBuffer` 直出 stdout PNG；`-progress` 对 10 秒文件只推 1 次（短文件进度条就是 0→100，正常）；元数据默认保留、清除要显式 `-map_metadata -1`。落盘两道数据丢失防线：**没开覆盖却算出与源同名的输出路径要自己拦**（ffmpeg 那句 "cannot edit existing files in-place" 拦不住走临时文件+rename 的我们）、**分割全成才落盘**（半套分段比一段都没有更难排查，同位图字体 writeAllAtomic）；分割各段共用一个 taskId 让 canceledTasks 能拦住后续段，段进度换算成整体否则每切一段从 0 重走。渲染进程：**单个 `useToolConfig('media-audio')` 而非两 tab 各一份**（输出设置是同一个概念，共用才能让那一大块留在 v-if 外面）、编码器下拉两层过滤（探测到的 ∩ 装得进容器）+ 失效时 watch 回落、**VBR 质量方向两者相反**（mp3 0 最好、vorbis 越大越好）故 label 必须写清、体积变化列**保留负数**（音频转码常常变大，截断成 0 是骗人）。新组件 `WaveformSelect.vue` 与 Crop/RegionCanvas **同源但单位不同**——那两个存原始像素乘 scale，这里**存秒换百分比**，因为波形图由 ffmpeg 按任意宽度现画再 `object-fit:fill` 拉满，没有「原始像素」可锚定；没动过的按下视为**跳播**而不是造一个零宽选区；波形用中性灰、只有手动选区用主色。「按静音分割」给的是**静音区间的补集**（说话的那几段）。**验证 esbuild 打包法 16 组 65 断言全绿**，三个自己踩的坑：`handle` 桩必须完整镜像 helper.ts 的 `{code,data,message}` 与 catch（否则 49 个矩阵格子全读成失败）、**「PNG 非空 525B」这种断言毫无意义**（纯正弦波的波形图压缩后就是 525B，换成 magic + IHDR 宽高 + 与静音产物不同）、**断言与源码注释冲突时先怀疑注释**（-vn 那条就是这么纠正的）；三处桩替换加了「一处都没命中就抛」的守卫。基准：10 分钟 mp3 320k 单个 11.3s。见 skill media-audio。**review 抓到两个 bug**：① 输出目录输入框全仓库 14 处**有 7 处是单向 `:value` 绑定**（光标能进、打字没反应），统一改 `v-model:value` 并去掉精灵图切割那处的 `readonly`、placeholder 统一「选择或粘贴输出目录」（六处落盘前都 `mkdir recursive`，手输不存在的路径会自动建）；② 手动选区导出报 **"An object could not be cloned"** —— `selection` 是 `ref`，`.value` 是**深层响应式 Proxy**，V8 结构化克隆不认，且 typecheck/build 全绿只在运行时炸，修法是在调用点重建纯对象。第二条仓库已踩第三次（图片压缩 `advanced`、文件统计 `ignoreDirs`），故把规则提到跨功能的 skill ipc-contract 而非只留局部注释。
 
 **工程 / 打包**
 - `2026-08-21` **electron-builder 接入**：**两条命令、输出分开**——`pnpm build:dir` 出免安装 `release/unpacked/win-unpacked`（`--dir` 跳过 installer，快），`pnpm build:setup` 出 `release/installer/` 下 NSIS 安装包 + portable（各自 `-c.directories.output` 覆盖）。均先 typecheck + electron-vite build。配置在 `electron-builder.yml`。**原生模块 asarUnpack**：`sharp`/`@img`（sharp .node）、`@ffmpeg-installer`/`@ffprobe-installer`（.exe）——不解包则 asar 内无法 require/spawn；实测都落在 `app.asar.unpacked`。**统一图标**取标题栏的 `CubeOutline`：`build/icon.svg` → sharp 渲成 `build/icon.png`+`public/icon.png`，electron-builder 自动生成 .ico 并嵌入 exe（旧图标是 Windows 图标缓存未刷新，非配置问题），窗口/favicon/安装包三处同源，换图标只改 svg 重渲。pnpm 10+ 不装其它平台可选二进制，打包 warn 一串非本平台的包可忽略。见 skill packaging。

@@ -258,7 +258,7 @@
       <div class="stylize__field">
         <label class="stylize__label">输出目录</label>
         <div class="stylize__dir">
-          <n-input :value="config.outputDir" size="small" placeholder="选择输出目录" />
+          <n-input v-model:value="config.outputDir" size="small" placeholder="选择或粘贴输出目录" />
           <n-button size="small" :disabled="config.overwrite" @click="handlePickOutputDir">
             <n-icon :component="FolderOpenOutline" />
           </n-button>

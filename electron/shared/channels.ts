@@ -78,6 +78,29 @@ export const VIDEO_CHANNELS = {
   transcodeProgress: 'video:transcodeProgress',
 } as const;
 
+/**
+ * 音频处理通道（ffmpeg）。
+ *
+ * 与 VIDEO_CHANNELS 分开：那组是视频语义（分辨率/帧率/调色板），且音频要自己的
+ * 波形图与静音检测通道。但**能力探测复用 `VIDEO_CHANNELS.capabilities`**——
+ * `probeCapabilities()` 返回的结构里本来就有 audioEncoders，再开一条是重复。
+ */
+export const AUDIO_CHANNELS = {
+  /** ffprobe 读音频元信息，顺带把路径登记进 tb-media 播放白名单。 */
+  probe: 'audio:probe',
+  /** 画波形图（PNG data URL，不落盘）。 */
+  waveform: 'audio:waveform',
+  /** 转码 / 剪切单个音频。 */
+  convert: 'audio:convert',
+  /** 检测静音区间（按静音分割用）。 */
+  detectSilence: 'audio:detectSilence',
+  /** 按区间列表切成多段。 */
+  split: 'audio:split',
+  cancel: 'audio:cancel',
+  /** 主进程 → 渲染进程：处理进度推送。 */
+  progress: 'audio:progress',
+} as const;
+
 /** 字体处理通道（subset-font + fontkit）。 */
 export const FONT_CHANNELS = {
   /** 读字体元信息（字体名/字形数/大小）。 */

@@ -188,7 +188,11 @@
         <div class="sprite__field">
           <label class="sprite__label">输出目录</label>
           <div class="sprite__dir">
-            <n-input :value="mergeConfig.outputDir" size="small" placeholder="选择输出目录" />
+            <n-input
+              v-model:value="mergeConfig.outputDir"
+              size="small"
+              placeholder="选择或粘贴输出目录"
+            />
             <n-button size="small" @click="pickMergeDir"
               ><n-icon :component="FolderOpenOutline"
             /></n-button>
@@ -334,10 +338,9 @@
           <label class="sprite__label">输出目录</label>
           <div class="sprite__dir">
             <n-input
-              :value="sliceConfig.outputDir"
+              v-model:value="sliceConfig.outputDir"
               size="small"
-              readonly
-              placeholder="选择输出目录"
+              placeholder="选择或粘贴输出目录"
             />
             <n-button size="small" @click="pickSliceDir"
               ><n-icon :component="FolderOpenOutline"

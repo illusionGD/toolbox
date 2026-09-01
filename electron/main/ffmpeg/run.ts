@@ -201,6 +201,42 @@ export function cancelFfmpeg(taskId: string): boolean {
 }
 
 /**
+ * 执行一次 ffmpeg 并把**完整 stderr** 收下（滤镜的分析结果用）。
+ *
+ * 与 runFfmpeg 分开是因为那里 stderr 只留最后 40 行（够拼一句错误原因就行）。
+ * 但 `silencedetect` 之类的分析型滤镜把结果**全部打在 stderr 上**，一个十分钟
+ * 的文件可能报几十段静音，留尾部就会把前面的检出结果全丢掉。
+ * @param args ffmpeg 参数（通常输出到 `-f null -`，只要分析结果不要文件）。
+ * @returns 完整 stderr 文本。
+ * @throws 非 0 退出时抛出，message 为 stderr 尾部。
+ */
+export function runFfmpegCollectStderr(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(FFMPEG_PATH, ['-hide_banner', '-nostdin', '-y', ...args], {
+      windowsHide: true,
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(stderr);
+        return;
+      }
+      const detail = stderr
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(-4)
+        .join('；');
+      reject(new Error(detail || `ffmpeg 退出码 ${code}`));
+    });
+  });
+}
+
+/**
  * 执行一次 ffmpeg 并把 stdout 当二进制收下（抽帧用）。
  *
  * 与 runFfmpeg 分开是因为这里 stdout 是图片数据而非 -progress 文本，

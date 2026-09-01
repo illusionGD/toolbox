@@ -951,6 +951,173 @@ export interface VideoProgress {
   speed: number;
 }
 
+/* ── 音频（ffmpeg） ───────────────────────────────────────────────── */
+
+/**
+ * 音频文件的元信息。
+ *
+ * 不复用 VideoMeta：那个结构里一半字段（分辨率、帧率、像素格式）对音频永远是 0，
+ * 页面要处处判空；这里只留音频真正有的字段。
+ */
+export interface AudioMeta {
+  /** 时长秒；容器未给出时为 0（此时进度只能按已处理时间显示）。 */
+  duration: number;
+  /** 容器格式名，如 mp3 / mov,mp4,m4a。 */
+  container: string;
+  /** 文件大小字节。 */
+  size: number;
+  /** 音频流编码名，如 mp3 / aac；无音频流时为空串。 */
+  codec: string;
+  /** 声道数；未知为 0。 */
+  channels: number;
+  /** 采样率 Hz；未知为 0。 */
+  sampleRate: number;
+  /** 码率 bps（流码率缺失时退回容器总码率）；未知为 0。 */
+  bitrate: number;
+  /** 是否含视频流（从视频里提取音频时用来提示用户）。 */
+  hasVideo: boolean;
+}
+
+/** 输出容器。original = 保持源容器。 */
+export type AudioFormat = 'original' | 'mp3' | 'm4a' | 'wav' | 'flac' | 'ogg' | 'opus' | 'aac';
+
+/** 音频编码器。copy = 不重新编码，只换封装。 */
+export type AudioCodec =
+  'libmp3lame' | 'aac' | 'libopus' | 'libvorbis' | 'flac' | 'alac' | 'pcm_s16le' | 'copy';
+
+/** 码率模式。VBR 只有部分编码器支持（实测 mp3 / vorbis 有，opus / flac 无）。 */
+export type AudioRateMode = 'cbr' | 'vbr' | 'lossless';
+
+/** 音频转码 / 剪切选项。 */
+export interface AudioConvertOptions {
+  /** 任务 id，用于关联进度推送与取消。 */
+  taskId: string;
+  /** 输出容器。 */
+  format: AudioFormat;
+  /** 音频编码器。 */
+  codec: AudioCodec;
+  /** 码率模式。 */
+  rateMode: AudioRateMode;
+  /** cbr 模式的目标码率 kbps。 */
+  bitrate: number;
+  /** vbr 质量（mp3 为 0-9，越小越好；vorbis 为 0-10，越大越好）。 */
+  quality: number;
+  /** flac 压缩等级 0-12；实测 12 比 5 慢 48% 只多省 1.5%，默认 5。 */
+  compressionLevel: number;
+  /** 声道数；0 = 保持源。 */
+  channels: number;
+  /** 采样率 Hz；0 = 保持源。libopus 只接受 48000，pre-flight 会拦。 */
+  sampleRate: number;
+  /** 音量增益 dB；0 = 不调整。 */
+  volumeDb: number;
+  /** 响度归一目标 LUFS；null = 不做。实测单趟即可达标，不必两趟。 */
+  loudnessTarget: number | null;
+  /** 淡入秒；0 = 不做。 */
+  fadeIn: number;
+  /** 淡出秒；0 = 不做。 */
+  fadeOut: number;
+  /** 是否保留源文件的元数据标签（title/artist 等）。 */
+  keepMetadata: boolean;
+  /** 剪切区间（秒）；不给则处理整条。 */
+  trim?: { start: number; end: number };
+  /** 输出目录（overwrite 为 true 时忽略）。 */
+  outputDir: string;
+  /** 是否覆盖原文件。 */
+  overwrite: boolean;
+}
+
+/** 音频转码结果。 */
+export interface AudioConvertResult {
+  /** 源文件路径。 */
+  sourcePath: string;
+  /** 输出文件路径；被取消时为空串。 */
+  outputPath: string;
+  /** 原始大小字节。 */
+  originalSize: number;
+  /** 输出大小字节；被取消时为 0。 */
+  outputSize: number;
+  /** 体积变化百分比，正数为变小；可能为负（如 wav 转无损 flac 之外的升码率场景）。 */
+  ratio: number;
+  /** 输出时长秒（剪切后的实际时长，用于如实展示帧对齐误差）。 */
+  duration: number;
+  /** 是否被用户取消。取消不是错误，正常返回并置位。 */
+  canceled: boolean;
+  /** 是否走了 -c:a copy（只换封装、未重新编码）。 */
+  streamCopy: boolean;
+}
+
+/** 静音区间（秒）。 */
+export interface SilenceRange {
+  /** 起点秒。 */
+  start: number;
+  /** 终点秒。 */
+  end: number;
+}
+
+/** 静音检测选项。 */
+export interface DetectSilenceOptions {
+  /** 判定为静音的电平阈值 dB（如 -50 表示低于 -50dB 算静音）。 */
+  noiseDb: number;
+  /** 最短静音时长秒，短于此的不算。 */
+  minDuration: number;
+}
+
+/** 静音检测结果。 */
+export interface DetectSilenceResult {
+  /** 文件总时长秒。 */
+  duration: number;
+  /** 检出的静音区间。 */
+  silences: SilenceRange[];
+}
+
+/** 波形图选项。 */
+export interface WaveformOptions {
+  /** 输出宽度 px。 */
+  width: number;
+  /** 输出高度 px。 */
+  height: number;
+  /** 波形颜色（CSS 颜色串）。 */
+  color: string;
+}
+
+/** 按区间列表分割的选项。 */
+export interface AudioSplitOptions extends AudioConvertOptions {
+  /**
+   * 要输出的区间列表（秒）。渲染进程算好后传下来，主进程只切不重算——
+   * 静音检测与「平均分段」两种来源在页面上就已经归一成同一个区间列表。
+   */
+  segments: SilenceRange[];
+  /** 输出名模板，`{n}` 替换为从 1 起的段序号。 */
+  nameTemplate: string;
+}
+
+/** 分割结果。 */
+export interface AudioSplitResult {
+  /** 各段输出路径（按顺序）；被取消时为空数组。 */
+  outputPaths: string[];
+  /** 输出总大小字节。 */
+  outputSize: number;
+  /** 是否被用户取消。 */
+  canceled: boolean;
+}
+
+/**
+ * 音频处理进度推送。
+ *
+ * 字段与 VideoProgress 相同但**不复用**：两者会各自演进（音频往后可能要加分段
+ * 序号），共用会在改一处时误伤另一处。
+ */
+export interface AudioProgress {
+  /** 任务 id。 */
+  taskId: string;
+  /** 已处理到的时间点（秒）。 */
+  outTime: number;
+  /** 完成百分比 0-100；源时长未知时为 -1（页面改显示已处理时间）。 */
+  percent: number;
+  /** 处理速度倍率；未知为 0。 */
+  speed: number;
+}
+
 /* ── 字体（裁剪 / 转换） ──────────────────────────────────────────── */
 
 /** 字体输出格式。original = 保持源格式。 */

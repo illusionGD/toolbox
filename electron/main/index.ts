@@ -6,6 +6,7 @@ import { registerDialogIpc } from './ipc/dialog';
 import { registerFileIpc } from './ipc/file';
 import { registerImageIpc } from './ipc/image';
 import { registerVideoIpc } from './ipc/video';
+import { registerAudioIpc } from './ipc/audio';
 import { registerFontIpc } from './ipc/font';
 import { registerBitmapFontIpc } from './ipc/bitmapFont';
 import { registerExcelIpc } from './ipc/excel';
@@ -48,6 +49,7 @@ function createWindow(): void {
   registerFileIpc(mainWindow);
   registerImageIpc();
   registerVideoIpc(mainWindow);
+  registerAudioIpc(mainWindow);
   registerFontIpc(mainWindow);
   registerBitmapFontIpc(mainWindow);
   registerExcelIpc();

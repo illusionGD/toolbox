@@ -34,6 +34,17 @@ description: Toolbox IPC 统一返回契约 {code,data,message}——主进程 h
 - **services 导出的 API 函数一律加 `Api` 后缀**（`pickFilesApi`/`compressImageApi`/`loginApi` 等）；内部工具（unwrap）不加。
 - **提示是否显示由 service 层通过 unwrap 的 silent 控制**（默认显示）；组件内不要再对同一错误重复 message，避免双弹。
 - 批量/逐条处理场景用 `silent:true`，错误落到每行 status/error 上更合适。
+- **传给 IPC 的对象必须是纯对象，不能带响应式 Proxy** —— `reactive()` 的嵌套字段、`ref` 里存的对象（读 `.value` 拿到的是深层响应式 Proxy）直接传会报 **"An object could not be cloned"**（V8 结构化克隆不认 Proxy），而且是**运行时才炸、typecheck 与 build 全绿**。顶层原始值字段没事（读出来就是数字/字符串），**只有嵌套对象与数组要重建**：
+
+  ```ts
+  // 数组 / 深嵌套：JSON round-trip
+  ignoreDirs: JSON.parse(JSON.stringify(config.ignoreDirs)) as string[],
+  // 少量已知字段：直接摊成字面量更清楚
+  cells: cells.value.map((c) => ({ rect: { ...c.rect }, name: c.name })),
+  trim: { start: trim.start, end: trim.end },
+  ```
+
+  已经踩过三次（#1 图片压缩 `advanced`、#12 文件统计 `ignoreDirs`、#20 音频剪切 `trim`），修法都是在**调用点**重建纯对象 —— 不在 service 层统一深拷贝，因为那会给每次调用加一次无谓的序列化，且掩盖「这个字段是响应式的」这一事实。
 
 ## 验证
 

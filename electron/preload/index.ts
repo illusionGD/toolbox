@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { electronAPI } from '@electron-toolkit/preload';
 import {
   APP_CHANNELS,
+  AUDIO_CHANNELS,
   BITMAP_FONT_CHANNELS,
   DIALOG_CHANNELS,
   EXCEL_CHANNELS,
@@ -12,6 +13,12 @@ import {
   WINDOW_CHANNELS,
 } from '../shared/channels';
 import type {
+  AudioConvertOptions,
+  AudioConvertResult,
+  AudioMeta,
+  AudioProgress,
+  AudioSplitOptions,
+  AudioSplitResult,
   AutoCropOptions,
   BitmapFontOptions,
   BitmapFontPackOptions,
@@ -23,6 +30,8 @@ import type {
   CropOptions,
   CropProbe,
   CropResult,
+  DetectSilenceOptions,
+  DetectSilenceResult,
   ExcelI18nOptions,
   ExcelI18nPreviewResult,
   ExcelI18nWriteResult,
@@ -63,6 +72,7 @@ import type {
   VideoCapabilities,
   VideoMeta,
   VideoProgress,
+  WaveformOptions,
 } from '../shared/types';
 
 /** 暴露给渲染进程的自定义 API。 */
@@ -353,6 +363,75 @@ const api = {
       const listener = (_event: unknown, progress: VideoProgress): void => callback(progress);
       ipcRenderer.on(VIDEO_CHANNELS.transcodeProgress, listener);
       return () => ipcRenderer.off(VIDEO_CHANNELS.transcodeProgress, listener);
+    },
+  },
+
+  /** 音频处理（ffmpeg）。 */
+  audio: {
+    /**
+     * 读音频元信息，同时把该路径登记进 tb-media 播放白名单。
+     * @param filePath 音频路径。
+     * @returns 统一响应，data 为元信息。
+     */
+    probe: (filePath: string): Promise<IpcResponse<AudioMeta>> =>
+      ipcRenderer.invoke(AUDIO_CHANNELS.probe, filePath),
+    /**
+     * 画波形图（不落盘）。
+     * @param filePath 音频路径。
+     * @param options 尺寸与颜色。
+     * @returns 统一响应，data 为 PNG data URL。
+     */
+    waveform: (filePath: string, options: WaveformOptions): Promise<IpcResponse<string>> =>
+      ipcRenderer.invoke(AUDIO_CHANNELS.waveform, filePath, options),
+    /**
+     * 转码单个音频。
+     * @param sourcePath 源文件路径。
+     * @param options 转码选项（含 taskId，用于取消与进度关联）。
+     * @returns 统一响应，data 为转码结果。
+     */
+    convert: (
+      sourcePath: string,
+      options: AudioConvertOptions,
+    ): Promise<IpcResponse<AudioConvertResult>> =>
+      ipcRenderer.invoke(AUDIO_CHANNELS.convert, sourcePath, options),
+    /**
+     * 检测静音区间。
+     * @param filePath 音频路径。
+     * @param options 阈值与最短时长。
+     * @returns 统一响应，data 为总时长与静音区间。
+     */
+    detectSilence: (
+      filePath: string,
+      options: DetectSilenceOptions,
+    ): Promise<IpcResponse<DetectSilenceResult>> =>
+      ipcRenderer.invoke(AUDIO_CHANNELS.detectSilence, filePath, options),
+    /**
+     * 按区间列表把音频切成多段。
+     * @param sourcePath 源文件路径。
+     * @param options 分割选项。
+     * @returns 统一响应，data 为各段输出路径。
+     */
+    split: (
+      sourcePath: string,
+      options: AudioSplitOptions,
+    ): Promise<IpcResponse<AudioSplitResult>> =>
+      ipcRenderer.invoke(AUDIO_CHANNELS.split, sourcePath, options),
+    /**
+     * 取消进行中的音频处理。
+     * @param taskId 任务 id。
+     * @returns 统一响应，data 为是否杀掉了对应进程。
+     */
+    cancel: (taskId: string): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(AUDIO_CHANNELS.cancel, taskId),
+    /**
+     * 订阅音频处理进度。
+     * @param callback 进度回调。
+     * @returns 取消订阅的函数。
+     */
+    onProgress: (callback: (progress: AudioProgress) => void): (() => void) => {
+      const listener = (_event: unknown, progress: AudioProgress): void => callback(progress);
+      ipcRenderer.on(AUDIO_CHANNELS.progress, listener);
+      return () => ipcRenderer.off(AUDIO_CHANNELS.progress, listener);
     },
   },
 
