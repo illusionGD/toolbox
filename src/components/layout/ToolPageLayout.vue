@@ -13,7 +13,7 @@
 
     <!-- 标题 + 描述 -->
     <div class="tool-page__head">
-      <h1 class="tool-page__title">{{ title }}</h1>
+      <!-- <h1 class="tool-page__title">{{ title }}</h1> -->
       <p v-if="desc" class="tool-page__desc">{{ desc }}</p>
     </div>
 

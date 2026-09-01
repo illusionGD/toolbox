@@ -49,6 +49,15 @@ export function saveTextApi(options: SaveTextOptions): Promise<string | null> {
 }
 
 /**
+ * 读取文本文件内容（utf-8）。
+ * @param filePath 文件路径。
+ * @returns 文本内容。
+ */
+export function readTextApi(filePath: string): Promise<string> {
+  return unwrap(window.api.file.readText(filePath), { errorPrefix: '读取文件失败' });
+}
+
+/**
  * 批量重命名。
  * 主进程 pre-flight 不过时整批不执行，结果里的 conflicts 由调用方逐行展示。
  * @param pairs 源路径与新文件名的配对。

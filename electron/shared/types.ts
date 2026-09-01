@@ -950,3 +950,443 @@ export interface VideoProgress {
   /** 处理速度倍率，如 2.5 表示 2.5x；未知为 0。 */
   speed: number;
 }
+
+/* ── 字体（裁剪 / 转换） ──────────────────────────────────────────── */
+
+/** 字体输出格式。original = 保持源格式。 */
+export type FontOutputFormat = 'original' | 'ttf' | 'otf' | 'woff' | 'woff2';
+
+/** 字体元信息（fontkit 读取的精简投影）。 */
+export interface FontMeta {
+  /** 字体族名（familyName）。 */
+  familyName: string;
+  /** 字形数。 */
+  glyphCount: number;
+  /** 文件大小字节。 */
+  size: number;
+}
+
+/** 字体裁剪选项。 */
+export interface FontSubsetOptions {
+  /** 要保留的字符集（已去重的字符串）。 */
+  chars: string;
+  /** 输出格式。 */
+  format: FontOutputFormat;
+  /** 输出目录绝对路径（overwrite 为 true 时忽略）。 */
+  outputDir: string;
+  /** 是否覆盖原文件。 */
+  overwrite: boolean;
+}
+
+/** 字体裁剪结果。 */
+export interface FontSubsetResult {
+  /** 源文件路径。 */
+  sourcePath: string;
+  /** 输出文件路径。 */
+  outputPath: string;
+  /** 原始大小字节。 */
+  originalSize: number;
+  /** 裁剪后大小字节。 */
+  subsetSize: number;
+  /** 体积变化百分比（正=减小）。 */
+  ratio: number;
+  /** 实际输出格式（original 解析后的结果）。 */
+  outputFormat: Exclude<FontOutputFormat, 'original'>;
+}
+
+/* ── 字体网页分包（cn-font-split） ────────────────────────────────── */
+
+/** 附加生成的样式表格式（在 CSS 之外，复制同内容为 less/scss）。 */
+export type FontSplitStyleFormat = 'less' | 'scss';
+
+/** 分包字体输出格式（subset-font 可产出的）。woff2 由 cn-font-split 直接出，其余由 woff2 转。 */
+export type FontSplitFormat = 'woff2' | 'woff' | 'ttf';
+
+/** 字体网页分包选项。 */
+export interface FontSplitOptions {
+  /** 单个分包的目标大小（字节），默认 70KB。 */
+  chunkSize: number;
+  /** 输出的字体格式（woff2/woff/ttf 均可选；非 woff2 的由 woff2 逐 chunk 转）。 */
+  formats: FontSplitFormat[];
+  /** 保留原格式：额外输出与源字体同格式的分包（源为 ttf/woff 时）。 */
+  keepOriginal: boolean;
+  /** 生成测试 HTML 预览页。 */
+  testHtml: boolean;
+  /** 保留 OpenType 特性（连字、字距等）。 */
+  fontFeature: boolean;
+  /** 按语言分区（CJK/拉丁等各自成组）。 */
+  languageArea: boolean;
+  /** CSS 里保留 unicode 注释；关闭则生成无注释、更紧凑的样式。 */
+  cssComment: boolean;
+  /** 额外生成的样式表格式（less/scss，内容同 CSS）。 */
+  extraStyles: FontSplitStyleFormat[];
+  /** 分包字体文件名模板；支持 [index]、[hash] 等占位，空则用默认。 */
+  chunkName: string;
+  /** 生成的 CSS 里的 font-family 名；空则用字体自身名。 */
+  cssFontFamily: string;
+  /** 输出根目录；实际会在其下建以字体名命名的子目录。 */
+  outputDir: string;
+}
+
+/** 字体分包结果。 */
+export interface FontSplitResult {
+  /** 实际输出目录（输出根目录下的字体名子目录）。 */
+  outDir: string;
+  /** 产出文件总数。 */
+  fileCount: number;
+  /** 分包字体文件数。 */
+  chunkCount: number;
+  /** CSS 文件路径；无则空串。 */
+  cssPath: string;
+  /** 产出总大小（字节）。 */
+  totalSize: number;
+}
+
+/* ── 字体格式转换（fontverter 纯容器转换） ────────────────────────── */
+
+/**
+ * 格式转换的目标格式。
+ *
+ * 不含 otf：ttf(glyf) 与 otf(CFF) 的差别是字形轮廓的存储方式，互转需要重建全部
+ * 字形轮廓，现有依赖（fontverter / subset-font / harfbuzz）都做不到——subset-font
+ * 传 targetFormat:'sfnt' 给 ttf 源返回的字节与 'truetype' 完全相同。故不提供该选项。
+ */
+export type FontConvertFormat = 'ttf' | 'woff' | 'woff2';
+
+/** 字体格式转换选项。 */
+export interface FontConvertOptions {
+  /** 任务 id，用于进度推送与取消匹配（放选项内，同 TranscodeOptions）。 */
+  taskId: string;
+  /** 目标格式，可多选，一次调用产出多个文件。 */
+  formats: FontConvertFormat[];
+  /** 输出目录绝对路径；空串表示输出到源文件同目录。 */
+  outputDir: string;
+  /** 目标文件已存在时是否覆盖。 */
+  overwrite: boolean;
+}
+
+/** 转换产出的单个文件。 */
+export interface FontConvertFile {
+  /** 该文件的格式。 */
+  format: FontConvertFormat;
+  /** 输出文件绝对路径。 */
+  path: string;
+  /** 文件大小字节。 */
+  size: number;
+}
+
+/** 字体格式转换结果。 */
+export interface FontConvertResult {
+  /** 源文件路径。 */
+  sourcePath: string;
+  /** 源容器格式（fontverter 探测值：sfnt/woff/woff2，其中 sfnt 含 ttf 与 otf）。 */
+  sourceFormat: string;
+  /** 源文件大小字节。 */
+  sourceSize: number;
+  /** 字形数；转换是无损的，产物字形数应与此一致。 */
+  glyphCount: number;
+  /** 成功产出的文件。 */
+  files: FontConvertFile[];
+  /** 被跳过的格式（目标已存在且未开覆盖，或目标路径就是源文件本身）。 */
+  skipped: FontConvertFormat[];
+  /** 被用户取消：不是错误，页面把该行退回 pending。 */
+  canceled?: boolean;
+}
+
+/**
+ * 格式转换进度。
+ *
+ * fontverter 的 convert 是一次不可分割的 async 调用、没有进度回调，所以进度只能
+ * 到「多个目标格式里正在转第几个」这一粒度，不编造格式内部的假百分比。
+ */
+export interface FontConvertProgress {
+  /** 任务 id，页面据此过滤掉过期任务的推送。 */
+  taskId: string;
+  /** 当前正在转换的目标格式。 */
+  format: FontConvertFormat;
+  /** 已完成的格式数。 */
+  done: number;
+  /** 目标格式总数。 */
+  total: number;
+}
+
+/* ── 位图字体（fontkit 取字形路径 + sharp 栅格化） ──────────────────── */
+
+/**
+ * 描述文件格式。
+ *
+ * 三者是 AngelCode BMFont 的等价编码，承载的数据完全相同，只是语法不同：
+ * fnt（文本，Cocos/Unity/LibGDX）、xml（Pixi 默认）、json（Phaser/自研引擎直接 import）。
+ */
+export type BitmapFontDataFormat = 'fnt' | 'xml' | 'json';
+
+/** 单个字符在图集里的位置与度量，即 .fnt 的一条 char 行。 */
+export interface BitmapFontChar {
+  /** unicode 码点（.fnt 里的 id）。 */
+  id: number;
+  /** 所在页索引（0-based）。 */
+  page: number;
+  /** 在图集中的左上角 x。 */
+  x: number;
+  /** 在图集中的左上角 y。 */
+  y: number;
+  /** 位图宽；空格这类零面积字形为 0。 */
+  width: number;
+  /** 位图高；空格这类零面积字形为 0。 */
+  height: number;
+  /** 绘制时从光标位置到位图左上角的水平偏移。 */
+  xoffset: number;
+  /** 绘制时从行顶到位图上边的垂直偏移。 */
+  yoffset: number;
+  /** 绘制完光标前进量。 */
+  xadvance: number;
+}
+
+/** 字距对，即 .fnt 的一条 kerning 行。 */
+export interface BitmapFontKerning {
+  /** 前一个字符的码点。 */
+  first: number;
+  /** 后一个字符的码点。 */
+  second: number;
+  /** 附加的水平位移（通常为负，表示收紧）。 */
+  amount: number;
+}
+
+/** 字体 → 位图字体的生成选项。 */
+export interface BitmapFontOptions {
+  /** 任务 id，用于进度推送与取消匹配。 */
+  taskId: string;
+  /** 源字体路径。 */
+  sourcePath: string;
+  /** 要生成的字符（渲染进程已去重去换行）。 */
+  chars: string;
+  /** 字号 px。 */
+  fontSize: number;
+  /** 字形之间的间距 px（防线性采样时相邻字形渗色）。 */
+  spacing: number;
+  /** 图集四周的外边距 px。 */
+  padding: number;
+  /** 单页最大边长 px；装不下自动开新页。 */
+  pageSize: number;
+  /** 字形填充色（CSS 颜色串）。 */
+  fill: string;
+  /** 描边宽度 px；0 表示不描边。 */
+  outlineWidth: number;
+  /** 描边颜色（CSS 颜色串）。 */
+  outlineColor: string;
+  /** 是否提取字距对。 */
+  kerning: boolean;
+  /** 要输出的描述文件格式，可多选。 */
+  dataFormats: BitmapFontDataFormat[];
+  /** 输出目录绝对路径。 */
+  outputDir: string;
+  /** 产物基名，如 myfont → myfont_0.png + myfont.fnt。 */
+  baseName: string;
+}
+
+/** 单页图集的尺寸。 */
+export interface BitmapFontPageSize {
+  width: number;
+  height: number;
+}
+
+/** 位图字体生成结果（字体来源与图片来源共用）。 */
+export interface BitmapFontResult {
+  /** 图集 PNG 路径（多页则多个）。 */
+  pagePaths: string[];
+  /** 描述文件路径（每种格式一个）。 */
+  dataPaths: string[];
+  /** 实际写入描述文件的字符数。 */
+  charCount: number;
+  /** 源字体里没有的字符，原样拼成一串返回，让用户知道哪些字没生成。 */
+  missingChars: string;
+  /** 提取到的字距对数量。 */
+  kerningCount: number;
+  /** 各页实际尺寸。 */
+  pageSizes: BitmapFontPageSize[];
+  /** 被跳过的条目数（图片来源：未填字符 / 字符重复 / 图片解码失败）。 */
+  skippedCount: number;
+  /** 被用户取消：不是错误，页面把行退回 pending。 */
+  canceled?: boolean;
+}
+
+/** 单页预览。 */
+export interface BitmapFontPagePreview {
+  /** 预览图 data URL（webp，长边已缩到上限内）。 */
+  dataUrl: string;
+  /** 该页实际宽 px（未缩放前）。 */
+  width: number;
+  /** 该页实际高 px（未缩放前）。 */
+  height: number;
+  /** 该页含字符数。 */
+  charCount: number;
+}
+
+/** 生成预览结果（只算不写盘）。 */
+export interface BitmapFontPreview {
+  /** 各页预览。 */
+  pages: BitmapFontPagePreview[];
+  /** 总字符数。 */
+  charCount: number;
+  /** 源字体里没有的字符。 */
+  missingChars: string;
+  /** 装箱占用率百分比（字形面积 / 图集面积），让用户判断参数是否浪费空间。 */
+  occupancy: number;
+}
+
+/** 图片 → 位图字体：一张字符图与它对应的字符。 */
+export interface BitmapGlyphSource {
+  /** 图片路径。 */
+  path: string;
+  /** 该图对应的字符；空串表示用户没指定，主进程跳过并计数。 */
+  char: string;
+}
+
+/** 图片 → 位图字体的打包选项。 */
+export interface BitmapFontPackOptions {
+  /** 任务 id。 */
+  taskId: string;
+  /** 字形图片与字符的对应关系。 */
+  glyphs: BitmapGlyphSource[];
+  /** 行高 px。图片来源没有字体度量，只能由用户给。 */
+  lineHeight: number;
+  /** 基线到行顶的距离 px。同上，由用户给。 */
+  base: number;
+  /** 前进量补偿 px：xadvance = 图片宽 + 该值。 */
+  advanceAdjust: number;
+  /** 字形之间的间距 px。 */
+  spacing: number;
+  /** 图集四周的外边距 px。 */
+  padding: number;
+  /** 单页最大边长 px。 */
+  pageSize: number;
+  /** 打包前剔除每张图四周的透明边（同精灵图的 trim 语义）。 */
+  trim: boolean;
+  /** 要输出的描述文件格式。 */
+  dataFormats: BitmapFontDataFormat[];
+  /** 输出目录绝对路径。 */
+  outputDir: string;
+  /** 产物基名。 */
+  baseName: string;
+}
+
+/**
+ * 生成进度。
+ *
+ * 分阶段而非百分比：出图是「整页一个 SVG 交给 sharp」的一次不可分割调用，
+ * 内部无进度可读（同 FontConvertProgress 的态度，不编造匀速假进度条）。
+ */
+export interface BitmapFontProgress {
+  /** 任务 id，页面据此过滤过期推送。 */
+  taskId: string;
+  /** 当前阶段：render 取字形路径 / pack 装箱 / write 出图落盘。 */
+  stage: 'render' | 'pack' | 'write';
+  /** 该阶段已完成数。 */
+  done: number;
+  /** 该阶段总数。 */
+  total: number;
+}
+
+/* ── Excel 多语言表转 i18n JSON（exceljs） ────────────────────────── */
+
+/** 工作簿里单个工作表的结构信息。 */
+export interface ExcelSheetInfo {
+  /** 工作表名（作为选择与合并的标识）。 */
+  name: string;
+  /** 行数（含表头）。 */
+  rowCount: number;
+  /** 列数。 */
+  columnCount: number;
+  /**
+   * 表头行各列的文字，按 1-based 列序排列（headers[0] 即 A 列）。
+   * 空单元格为空串，保证下标与列号一一对应，便于渲染进程按列号取表头。
+   */
+  headers: string[];
+}
+
+/** 工作簿探测结果。 */
+export interface ExcelProbeResult {
+  /** 各工作表结构。 */
+  sheets: ExcelSheetInfo[];
+}
+
+/**
+ * 一个待导出的语言列。
+ * 文件名由渲染进程从表头解析并允许用户手改，主进程只按值落盘、不再猜。
+ */
+export interface ExcelI18nColumn {
+  /** 列号（1-based）。 */
+  column: number;
+  /** 表头原文（仅用于结果展示与告警定位）。 */
+  header: string;
+  /** 输出文件名（可含或不含 .json，主进程兜底补）。 */
+  fileName: string;
+}
+
+/** Excel 转多语言 JSON 的选项。 */
+export interface ExcelI18nOptions {
+  /** 参与解析的工作表名；多选时按此顺序合并进同一套 JSON。 */
+  sheets: string[];
+  /** 表头行行号（1-based）。 */
+  headerRow: number;
+  /** 数据起始行行号（1-based）。 */
+  startRow: number;
+  /** key 所在列号（1-based）。 */
+  keyColumn: number;
+  /** 要导出的语言列。 */
+  columns: ExcelI18nColumn[];
+  /** key 含点号时转成嵌套对象；关闭则整串作为平铺 key。 */
+  nested: boolean;
+  /** JSON 缩进空格数；0 表示压缩成单行。 */
+  indent: number;
+  /** 输出目录绝对路径；JSON 直接写在该目录下，不建子目录。 */
+  outputDir: string;
+}
+
+/** 单个语言列的解析统计。 */
+export interface ExcelI18nColumnStat {
+  /** 列号（1-based）。 */
+  column: number;
+  /** 输出文件名。 */
+  fileName: string;
+  /** 实际写入的 key 数（已跳过空译文）。 */
+  keyCount: number;
+  /** 译文为空被跳过的行数。 */
+  emptyCount: number;
+}
+
+/** 转换预览结果（只算不写盘）。 */
+export interface ExcelI18nPreviewResult {
+  /** 各语言列统计。 */
+  columns: ExcelI18nColumnStat[];
+  /** 被请求预览的那一列的 JSON 文本；请求列不存在时为空串。 */
+  previewJson: string;
+  /** key 为空被整行跳过的行数。 */
+  skippedRows: number;
+  /** 告警（key 冲突、嵌套结构冲突等），已聚合不逐条刷屏。 */
+  warnings: string[];
+}
+
+/** 落盘后的单个 JSON 文件信息。 */
+export interface ExcelI18nFile {
+  /** 文件名。 */
+  name: string;
+  /** 绝对路径。 */
+  path: string;
+  /** 写入的 key 数。 */
+  keyCount: number;
+  /** 文件大小（字节）。 */
+  size: number;
+}
+
+/** 转换落盘结果。 */
+export interface ExcelI18nWriteResult {
+  /** 实际输出目录。 */
+  outDir: string;
+  /** 产出的 JSON 文件。 */
+  files: ExcelI18nFile[];
+  /** key 为空被整行跳过的行数。 */
+  skippedRows: number;
+  /** 告警。 */
+  warnings: string[];
+}

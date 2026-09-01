@@ -8,17 +8,37 @@
     </div>
 
     <div class="title-bar__center">
-      <n-input
-        v-model:value="searchKeyword"
-        class="title-bar__search"
-        placeholder="搜索工具..."
-        clearable
-        size="small"
-      >
-        <template #prefix>
-          <n-icon :component="SearchOutline" />
-        </template>
-      </n-input>
+      <div class="title-bar__search-wrap">
+        <n-input
+          v-model:value="searchKeyword"
+          class="title-bar__search"
+          placeholder="搜索工具..."
+          clearable
+          size="small"
+          @focus="focused = true"
+          @blur="handleBlur"
+          @keydown="handleKeydown"
+        >
+          <template #prefix>
+            <n-icon :component="SearchOutline" />
+          </template>
+        </n-input>
+
+        <div v-if="showPanel" class="title-bar__results">
+          <button
+            v-for="(item, index) in results"
+            :key="item.key"
+            type="button"
+            class="title-bar__result"
+            :class="{ 'title-bar__result--active': index === activeIndex }"
+            @mouseenter="activeIndex = index"
+            @mousedown.prevent="selectTool(item)"
+          >
+            <span class="title-bar__result-label">{{ item.label }}</span>
+            <span class="title-bar__result-cat">{{ item.categoryLabel }}</span>
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="title-bar__right">
@@ -37,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { NIcon, NInput } from 'naive-ui';
 import {
   CloseOutline,
@@ -49,12 +69,14 @@ import {
 } from '@vicons/ionicons5';
 import { useThemeStore } from '@/stores/theme';
 import { useWindowControls } from '@/composables/useWindowControls';
+import { useToolLauncher } from '@/composables/useToolLauncher';
+import { TOOL_MAP, type FlatTool } from '@/utils/navigation';
 import AccountEntry from './AccountEntry.vue';
 
 // #region setup
 const themeStore = useThemeStore();
-const searchKeyword = ref('');
 const { isMaximized, minimize, toggleMaximize, close } = useWindowControls();
+const { openTool } = useToolLauncher();
 
 /** 最小化窗口。 */
 function handleMinimize(): void {
@@ -70,6 +92,78 @@ function handleToggleMaximize(): void {
 function handleClose(): void {
   close();
 }
+// #endregion
+
+// #region search
+/** 结果条数上限。 */
+const MAX_RESULTS = 8;
+
+/** 可搜索的叶子工具（有 path 的，顶层分类无 path 被排除），模块级算一次。 */
+const candidates: FlatTool[] = [...TOOL_MAP.values()].filter((t) => !!t.path);
+
+const searchKeyword = ref('');
+const focused = ref(false);
+const activeIndex = ref(0);
+
+/** 命中结果：匹配工具名或分类名（忽略大小写、去空白），空关键词不出结果。 */
+const results = computed<FlatTool[]>(() => {
+  const kw = searchKeyword.value.trim().toLowerCase();
+  if (!kw) return [];
+  return candidates
+    .filter((t) => t.label.toLowerCase().includes(kw) || t.categoryLabel.toLowerCase().includes(kw))
+    .slice(0, MAX_RESULTS);
+});
+
+/** 面板显隐：聚焦且有结果。 */
+const showPanel = computed(() => focused.value && results.value.length > 0);
+
+/**
+ * 选中工具：跳转并复位搜索状态。
+ * @param item 目标工具。
+ */
+function selectTool(item: FlatTool): void {
+  openTool(item.key, item.path);
+  searchKeyword.value = '';
+  focused.value = false;
+  activeIndex.value = 0;
+}
+
+/**
+ * 键盘导航：↑↓ 循环移动、Enter 选中、Esc 关闭。
+ * @param event 键盘事件。
+ */
+function handleKeydown(event: KeyboardEvent): void {
+  const list = results.value;
+  if (event.key === 'Escape') {
+    searchKeyword.value = '';
+    focused.value = false;
+    return;
+  }
+  if (!list.length) return;
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    activeIndex.value = (activeIndex.value + 1) % list.length;
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    activeIndex.value = (activeIndex.value - 1 + list.length) % list.length;
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    const target = list[activeIndex.value];
+    if (target) selectTool(target);
+  }
+}
+
+/** 失焦延时关闭面板：留时间给结果项的 mousedown 先触发。 */
+function handleBlur(): void {
+  window.setTimeout(() => {
+    focused.value = false;
+  }, 150);
+}
+
+// 关键词变化时把高亮复位到第一项，避免停在越界下标
+watch(searchKeyword, () => {
+  activeIndex.value = 0;
+});
 // #endregion
 </script>
 
@@ -105,10 +199,59 @@ function handleClose(): void {
     padding-right: var(--tb-space-4);
   }
 
-  &__search {
+  &__search-wrap {
+    position: relative;
     width: 260px;
-    // 仅搜索框排除拖拽，容器空白区仍可拖动窗口
+    // 搜索框与下拉面板都要排除拖拽，否则点不动
     -webkit-app-region: no-drag;
+  }
+
+  &__search {
+    width: 100%;
+  }
+
+  &__results {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    left: 0;
+    z-index: 20;
+    max-height: 320px;
+    overflow-y: auto;
+    padding: var(--tb-space-1);
+    background: var(--tb-bg-surface);
+    border: 1px solid var(--tb-border);
+    border-radius: var(--tb-radius-md);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  }
+
+  &__result {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--tb-space-3);
+    width: 100%;
+    padding: var(--tb-space-2) var(--tb-space-3);
+    border: none;
+    border-radius: var(--tb-radius-sm);
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+
+    &--active {
+      background: var(--tb-bg-hover);
+    }
+  }
+
+  &__result-label {
+    font-size: 13px;
+    color: var(--tb-text-primary);
+  }
+
+  &__result-cat {
+    flex: none;
+    font-size: 12px;
+    color: var(--tb-text-secondary);
   }
 
   &__right {

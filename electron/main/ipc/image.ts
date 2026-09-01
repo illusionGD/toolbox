@@ -855,7 +855,9 @@ async function readSpriteInputs(sources: string[], trim: boolean): Promise<Sprit
         try {
           buffer = await sharp(buffer).trim().png().toBuffer();
         } catch {
-          buffer = await sharp(await readFile(sourcePath)).png().toBuffer();
+          buffer = await sharp(await readFile(sourcePath))
+            .png()
+            .toBuffer();
         }
       }
       const meta = await sharp(buffer).metadata();
@@ -992,7 +994,14 @@ function layoutSingleGrid(inputs: SpriteInput[], options: SpriteMergeOptions): S
       left += Math.floor((colWidths[col] - img.width) / 2);
       top += Math.floor((rowHeights[row] - img.height) / 2);
     }
-    return { name: img.name, sourcePath: img.sourcePath, left, top, width: img.width, height: img.height };
+    return {
+      name: img.name,
+      sourcePath: img.sourcePath,
+      left,
+      top,
+      width: img.width,
+      height: img.height,
+    };
   });
 
   const totalW =
@@ -1093,7 +1102,11 @@ const SPRITE_DATA_EXT: Record<Exclude<SpriteDataFormat, 'none'>, string> = {
 };
 
 /** 把一张图集布局 composite 成图片 buffer（透明底 + 各帧叠加）。 */
-async function renderSheet(layout: SheetLayout, format: ResolvedFormat, quality: number): Promise<Buffer> {
+async function renderSheet(
+  layout: SheetLayout,
+  format: ResolvedFormat,
+  quality: number,
+): Promise<Buffer> {
   const composites = layout.frames.map((f, i) => ({
     input: layout.inputs[i].buffer,
     left: f.left,
@@ -1316,7 +1329,12 @@ async function cellsFromImport(dataPath: string): Promise<SpriteCell[]> {
   const cells: SpriteCell[] = [];
 
   if (ext === '.json') {
-    const doc = JSON.parse(text) as { frames?: Record<string, { frame?: CropRect | { x: number; y: number; w: number; h: number } }> };
+    const doc = JSON.parse(text) as {
+      frames?: Record<
+        string,
+        { frame?: CropRect | { x: number; y: number; w: number; h: number } }
+      >;
+    };
     const framesObj = doc.frames ?? {};
     for (const [key, value] of Object.entries(framesObj)) {
       const frame = value.frame as { x: number; y: number; w: number; h: number } | undefined;
@@ -1411,7 +1429,10 @@ async function cellsFromAuto(
   }
 
   // 第二趟：按根标签聚包围盒
-  const boxes = new Map<number, { minX: number; minY: number; maxX: number; maxY: number; area: number }>();
+  const boxes = new Map<
+    number,
+    { minX: number; minY: number; maxX: number; maxY: number; area: number }
+  >();
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = y * width + x;
@@ -1571,7 +1592,10 @@ async function generateQrCodes(options: QrGenerateOptions): Promise<QrGenerateRe
         const png = await QRCode.toBuffer(item.text, { type: 'png', width: size, ...common });
         const outputPath = join(outputDir, `${name}.${format === 'jpg' ? 'jpg' : 'png'}`);
         // qrcode 只出 png，jpg 用 sharp 转码（flatten 到 light 底色，jpg 无透明）
-        const buffer = format === 'jpg' ? await sharp(png).flatten({ background: light }).jpeg().toBuffer() : png;
+        const buffer =
+          format === 'jpg'
+            ? await sharp(png).flatten({ background: light }).jpeg().toBuffer()
+            : png;
         await writeFile(outputPath, buffer);
         outputPaths.push(outputPath);
       }
@@ -1647,8 +1671,9 @@ export function registerImageIpc(): void {
   handle(IMAGE_CHANNELS.spriteMergePreview, (_e, options: SpriteMergeOptions) =>
     spriteMergePreview(options),
   );
-  handle(IMAGE_CHANNELS.spriteSliceProbe, (_e, filePath: string, options: SpriteSliceProbeOptions) =>
-    spriteSliceProbe(filePath, options),
+  handle(
+    IMAGE_CHANNELS.spriteSliceProbe,
+    (_e, filePath: string, options: SpriteSliceProbeOptions) => spriteSliceProbe(filePath, options),
   );
   handle(IMAGE_CHANNELS.spriteSlice, (_e, filePath: string, options: SpriteSliceOptions) =>
     spriteSlice(filePath, options),

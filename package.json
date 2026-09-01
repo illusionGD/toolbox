@@ -8,7 +8,12 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "electron",
-      "esbuild"
+      "esbuild",
+      "cn-font-split"
+    ],
+    "ignoredBuiltDependencies": [
+      "koffi",
+      "protobufjs"
     ]
   },
   "scripts": {
@@ -38,12 +43,17 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "@vicons/ionicons5": "^0.13.0",
+    "cn-font-split": "^7.4.3",
+    "exceljs": "^4.4.0",
+    "fontkit": "^2.0.4",
+    "fontverter": "^2.0.0",
     "jsqr": "^1.4.0",
     "naive-ui": "^2.44.1",
     "pinia": "^4.0.2",
     "pixi.js": "^8.19.0",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.3",
+    "subset-font": "^2.5.0",
     "vue-router": "^5.2.0"
   },
   "devDependencies": {

@@ -31,6 +31,8 @@ export const FILE_CHANNELS = {
   scanProgress: 'file:scanProgress',
   showInFolder: 'file:showInFolder',
   saveText: 'file:saveText',
+  /** 读取文本文件内容（utf-8）。 */
+  readText: 'file:readText',
   /** 批量重命名（含 pre-flight 校验，冲突则整批不动）。 */
   renameBatch: 'file:renameBatch',
 } as const;
@@ -74,4 +76,51 @@ export const VIDEO_CHANNELS = {
   cancelTranscode: 'video:cancelTranscode',
   /** 主进程 → 渲染进程：转码进度推送。 */
   transcodeProgress: 'video:transcodeProgress',
+} as const;
+
+/** 字体处理通道（subset-font + fontkit）。 */
+export const FONT_CHANNELS = {
+  /** 读字体元信息（字体名/字形数/大小）。 */
+  probe: 'font:probe',
+  /** 只裁不写盘：返回裁剪后 woff2 的 data URL 供页面预览。 */
+  subsetPreview: 'font:subsetPreview',
+  /** 按字符集裁剪字体并落盘。 */
+  subset: 'font:subset',
+  /** 网页分包：一个字体切成多个 unicode-range 分包 + CSS。 */
+  split: 'font:split',
+  /** 纯容器格式转换（fontverter，无损不裁剪）。 */
+  convert: 'font:convert',
+  /** 取消正在进行的格式转换。 */
+  cancelConvert: 'font:cancelConvert',
+  /** 主进程 → 渲染进程：格式转换进度推送。 */
+  convertProgress: 'font:convertProgress',
+} as const;
+
+/**
+ * 位图字体通道（fontkit 取字形路径 + sharp 栅格化）。
+ *
+ * 与 FONT_CHANNELS 分开：那组是「字体文件进、字体文件出」，这里产出的是 PNG 图集 +
+ * 描述文件，且有自己的进度与取消，混在一起会让两组的语义都变模糊。
+ */
+export const BITMAP_FONT_CHANNELS = {
+  /** 从字体生成图集 + 描述文件。 */
+  generate: 'bitmapFont:generate',
+  /** 生成预览（只算不写盘）。 */
+  preview: 'bitmapFont:preview',
+  /** 从字符图片打包成位图字体。 */
+  packImages: 'bitmapFont:packImages',
+  /** 取消正在进行的生成。 */
+  cancel: 'bitmapFont:cancel',
+  /** 主进程 → 渲染进程：生成进度推送。 */
+  progress: 'bitmapFont:progress',
+} as const;
+
+/** Excel 多语言表转 i18n JSON 通道（exceljs）。 */
+export const EXCEL_CHANNELS = {
+  /** 读工作簿结构：sheet 名 / 指定表头行的各列文字 / 行列数。 */
+  probe: 'excel:probe',
+  /** 只算不写：按当前配置统计各语言列，并序列化其中一列的 JSON 供预览。 */
+  preview: 'excel:preview',
+  /** 转换并落盘：一种语言一个 JSON。 */
+  toJson: 'excel:toJson',
 } as const;

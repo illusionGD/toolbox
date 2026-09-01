@@ -6,10 +6,9 @@ import {
   QrCodeOutline,
   CreateOutline,
   StatsChartOutline,
-  DocumentTextOutline,
-  DocumentAttachOutline,
   VideocamOutline,
   FilmOutline,
+  LanguageOutline,
 } from '@vicons/ionicons5';
 import type { Component } from 'vue';
 
@@ -136,18 +135,11 @@ export const RECOMMEND_GROUPS: readonly RecommendGroup[] = [
         path: '/file/rename',
       },
       {
-        key: 'file-word2pdf',
-        label: 'Word 转 PDF',
-        desc: '批量转换文档',
-        icon: DocumentTextOutline,
-        path: '/file/word2pdf',
-      },
-      {
-        key: 'file-pdf2word',
-        label: 'PDF 转 Word',
-        desc: '批量转换文档',
-        icon: DocumentAttachOutline,
-        path: '/file/pdf2word',
+        key: 'file-excel-i18n',
+        label: 'Excel 多语言',
+        desc: '多语言表转 i18n JSON',
+        icon: LanguageOutline,
+        path: '/file/excel-i18n',
       },
     ],
   },

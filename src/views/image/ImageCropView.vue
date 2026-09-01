@@ -159,7 +159,7 @@
       <div class="crop__field">
         <label class="crop__label">输出目录</label>
         <div class="crop__dir">
-          <n-input :value="config.outputDir" size="small" readonly placeholder="选择输出目录" />
+          <n-input :value="config.outputDir" size="small" placeholder="选择输出目录" />
           <n-button size="small" :disabled="config.overwrite" @click="handlePickOutputDir">
             <n-icon :component="FolderOpenOutline" />
           </n-button>

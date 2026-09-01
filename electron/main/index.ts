@@ -6,6 +6,9 @@ import { registerDialogIpc } from './ipc/dialog';
 import { registerFileIpc } from './ipc/file';
 import { registerImageIpc } from './ipc/image';
 import { registerVideoIpc } from './ipc/video';
+import { registerFontIpc } from './ipc/font';
+import { registerBitmapFontIpc } from './ipc/bitmapFont';
+import { registerExcelIpc } from './ipc/excel';
 import { registerMediaProtocol, registerMediaScheme } from './protocol/media';
 import { APP_CHANNELS } from '../shared/channels';
 
@@ -45,6 +48,9 @@ function createWindow(): void {
   registerFileIpc(mainWindow);
   registerImageIpc();
   registerVideoIpc(mainWindow);
+  registerFontIpc(mainWindow);
+  registerBitmapFontIpc(mainWindow);
+  registerExcelIpc();
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);

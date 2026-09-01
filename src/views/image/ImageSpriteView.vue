@@ -1,5 +1,9 @@
 <template>
-  <ToolPageLayout title="精灵图" desc="多图合并为图集 + 坐标数据，或把图集切割为多张小图" category="图片工具">
+  <ToolPageLayout
+    title="精灵图"
+    desc="多图合并为图集 + 坐标数据，或把图集切割为多张小图"
+    category="图片工具"
+  >
     <template #toolbar>
       <n-tabs v-model:value="tab" type="segment" size="small" class="sprite__tabs">
         <n-tab name="merge">合并图集</n-tab>
@@ -26,11 +30,23 @@
               <template #icon><n-icon :component="FolderOpenOutline" /></template>
               添加文件夹
             </n-button>
-            <n-checkbox v-model:checked="mergeConfig.recursive" class="sprite__dim">含子文件夹</n-checkbox>
-            <n-button size="small" quaternary :disabled="!mergeChecked.length" @click="handleRemoveChecked">
+            <n-checkbox v-model:checked="mergeConfig.recursive" class="sprite__dim"
+              >含子文件夹</n-checkbox
+            >
+            <n-button
+              size="small"
+              quaternary
+              :disabled="!mergeChecked.length"
+              @click="handleRemoveChecked"
+            >
               移除选中{{ mergeChecked.length ? `(${mergeChecked.length})` : '' }}
             </n-button>
-            <n-button size="small" quaternary :disabled="!mergeItems.length" @click="handleClearMerge">
+            <n-button
+              size="small"
+              quaternary
+              :disabled="!mergeItems.length"
+              @click="handleClearMerge"
+            >
               清空
             </n-button>
           </div>
@@ -143,16 +159,27 @@
         <h3 class="sprite__ptitle sprite__ptitle--sub">输出</h3>
         <div class="sprite__field">
           <label class="sprite__label">坐标数据格式</label>
-          <n-select v-model:value="mergeConfig.dataFormat" :options="dataFormatOptions" size="small" />
+          <n-select
+            v-model:value="mergeConfig.dataFormat"
+            :options="dataFormatOptions"
+            size="small"
+          />
         </div>
         <div class="sprite__field">
           <label class="sprite__label">图片格式</label>
           <n-select v-model:value="mergeConfig.format" :options="sheetFormatOptions" size="small" />
-          <p v-if="mergeConfig.format === 'jpeg'" class="sprite__tip">JPG 不支持透明，间距/空隙会变黑</p>
+          <p v-if="mergeConfig.format === 'jpeg'" class="sprite__tip">
+            JPG 不支持透明，间距/空隙会变黑
+          </p>
         </div>
         <div class="sprite__field">
           <label class="sprite__label">图片质量 {{ mergeConfig.quality }}%</label>
-          <n-slider v-model:value="mergeConfig.quality" :min="1" :max="100" :disabled="mergeConfig.format === 'gif'" />
+          <n-slider
+            v-model:value="mergeConfig.quality"
+            :min="1"
+            :max="100"
+            :disabled="mergeConfig.format === 'gif'"
+          />
         </div>
         <div class="sprite__field">
           <label class="sprite__label">输出文件名</label>
@@ -161,11 +188,20 @@
         <div class="sprite__field">
           <label class="sprite__label">输出目录</label>
           <div class="sprite__dir">
-            <n-input :value="mergeConfig.outputDir" size="small" readonly placeholder="选择输出目录" />
-            <n-button size="small" @click="pickMergeDir"><n-icon :component="FolderOpenOutline" /></n-button>
+            <n-input :value="mergeConfig.outputDir" size="small" placeholder="选择输出目录" />
+            <n-button size="small" @click="pickMergeDir"
+              ><n-icon :component="FolderOpenOutline"
+            /></n-button>
           </div>
         </div>
-        <n-button type="primary" block class="sprite__mt" :loading="merging" :disabled="!canMerge" @click="handleMerge">
+        <n-button
+          type="primary"
+          block
+          class="sprite__mt"
+          :loading="merging"
+          :disabled="!canMerge"
+          @click="handleMerge"
+        >
           {{ mergeChecked.length ? `合并选中 (${mergeChecked.length})` : '合并全部' }}
         </n-button>
       </template>
@@ -176,7 +212,9 @@
             <template #icon><n-icon :component="ImageOutline" /></template>
             {{ sheetPath ? '更换图集' : '选择图集' }}
           </n-button>
-          <p v-if="sheetPath" class="sprite__tip">{{ sheetName }}（{{ sheetWidth }}×{{ sheetHeight }}）</p>
+          <p v-if="sheetPath" class="sprite__tip">
+            {{ sheetName }}（{{ sheetWidth }}×{{ sheetHeight }}）
+          </p>
         </div>
 
         <div class="sprite__field">
@@ -198,7 +236,12 @@
           <div v-if="sliceConfig.byCount" class="sprite__field">
             <label class="sprite__label">列数 / 行数</label>
             <div class="sprite__pair">
-              <n-input-number v-model:value="sliceConfig.columns" size="small" :min="1" :max="128" />
+              <n-input-number
+                v-model:value="sliceConfig.columns"
+                size="small"
+                :min="1"
+                :max="128"
+              />
               <n-input-number v-model:value="sliceConfig.rows" size="small" :min="1" :max="128" />
             </div>
           </div>
@@ -241,7 +284,9 @@
         <!-- 导入坐标 -->
         <template v-else-if="sliceConfig.method === 'import'">
           <div class="sprite__field">
-            <n-button size="small" block @click="handlePickData">选择坐标文件（JSON / plist）</n-button>
+            <n-button size="small" block @click="handlePickData"
+              >选择坐标文件（JSON / plist）</n-button
+            >
             <p v-if="dataPath" class="sprite__tip">{{ dataName }}</p>
           </div>
         </template>
@@ -258,7 +303,12 @@
             </div>
           </div>
           <div class="sprite__field">
-            <n-button size="small" block :disabled="!lineColumns.length && !lineRows.length" @click="clearLines">
+            <n-button
+              size="small"
+              block
+              :disabled="!lineColumns.length && !lineRows.length"
+              @click="clearLines"
+            >
               清空切割线（纵 {{ lineColumns.length }} / 横 {{ lineRows.length }}）
             </n-button>
           </div>
@@ -273,16 +323,35 @@
         </div>
         <div class="sprite__field">
           <label class="sprite__label">图片质量 {{ sliceConfig.quality }}%</label>
-          <n-slider v-model:value="sliceConfig.quality" :min="1" :max="100" :disabled="sliceConfig.format === 'gif'" />
+          <n-slider
+            v-model:value="sliceConfig.quality"
+            :min="1"
+            :max="100"
+            :disabled="sliceConfig.format === 'gif'"
+          />
         </div>
         <div class="sprite__field">
           <label class="sprite__label">输出目录</label>
           <div class="sprite__dir">
-            <n-input :value="sliceConfig.outputDir" size="small" readonly placeholder="选择输出目录" />
-            <n-button size="small" @click="pickSliceDir"><n-icon :component="FolderOpenOutline" /></n-button>
+            <n-input
+              :value="sliceConfig.outputDir"
+              size="small"
+              readonly
+              placeholder="选择输出目录"
+            />
+            <n-button size="small" @click="pickSliceDir"
+              ><n-icon :component="FolderOpenOutline"
+            /></n-button>
           </div>
         </div>
-        <n-button type="primary" block class="sprite__mt" :loading="slicing" :disabled="!canSlice" @click="handleSlice">
+        <n-button
+          type="primary"
+          block
+          class="sprite__mt"
+          :loading="slicing"
+          :disabled="!canSlice"
+          @click="handleSlice"
+        >
           切割导出 ({{ cells.length }})
         </n-button>
       </template>
@@ -291,7 +360,9 @@
     <template #footer>
       <div class="sprite__footer">
         <span v-if="tab === 'merge'">已选择 {{ mergeItems.length }} 张图片</span>
-        <span v-else>{{ sheetPath ? `图集 ${sheetWidth}×${sheetHeight}，将切出 ${cells.length} 张` : '未选择图集' }}</span>
+        <span v-else>{{
+          sheetPath ? `图集 ${sheetWidth}×${sheetHeight}，将切出 ${cells.length} 张` : '未选择图集'
+        }}</span>
       </div>
     </template>
   </ToolPageLayout>
@@ -493,7 +564,9 @@ const mergeColumns: DataTableColumns<SpriteMergeItem> = [
             src: row.thumbnail,
             style: 'width:36px;height:36px;object-fit:contain;border-radius:4px;display:block;',
           })
-        : h('div', { style: 'width:36px;height:36px;border-radius:4px;background:var(--tb-bg-hover);' }),
+        : h('div', {
+            style: 'width:36px;height:36px;border-radius:4px;background:var(--tb-bg-hover);',
+          }),
   },
   { title: '文件名', key: 'name', ellipsis: { tooltip: true } },
   {

@@ -1,6 +1,6 @@
 import { type BrowserWindow, dialog, shell } from 'electron';
 import { basename, dirname, extname, join } from 'path';
-import { readdir, rename, stat, writeFile } from 'fs/promises';
+import { readdir, readFile, rename, stat, writeFile } from 'fs/promises';
 import { FILE_CHANNELS } from '../../shared/channels';
 import type {
   RenameBatchResult,
@@ -456,6 +456,8 @@ export function registerFileIpc(win: BrowserWindow): void {
   });
 
   handle(FILE_CHANNELS.saveText, (_e, options: SaveTextOptions) => saveText(win, options));
+
+  handle(FILE_CHANNELS.readText, (_e, filePath: string) => readFile(filePath, 'utf-8'));
 
   handle(FILE_CHANNELS.renameBatch, (_e, pairs: RenamePair[]) => renameBatch(pairs));
 }

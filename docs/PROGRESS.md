@@ -3,14 +3,15 @@
 > 配合 [PLAN.md](./PLAN.md) 使用。PLAN 定"做什么、什么优先级"，本文件跟踪"做到哪、卡在哪"。
 > 状态图例：⬜ 未开始 · 🟡 进行中 · 🔵 待 review · ✅ 已完成 · ⛔ 卡住 · ⏸ 暂缓
 
-**最后更新**：2026-08-21
+**最后更新**：2026-08-31
 
 ---
 
 ## 当前进展
 
-- **当前任务**：#11 精灵图（合并图集 / 切割图集）🔵 待 review —— 网格合并 + JSON/CSS/plist 坐标；四种切割（网格/切割线/导入坐标/透明连通域）；含 SpriteSliceCanvas 画布，已配 skill。
-- **下一步**：P1 图片工具至此全部完成。按 PLAN 优先级进入 P2 剩余（#13 word 转 pdf / #14 pdf 转 word）或按用户插队安排。
+- **当前任务**：位图字体（#18）🔵 待 review —— 双 tab 页 `/font/bitmap`，fontkit 取字形 + sharp 整页 SVG 栅格化出 PNG 图集 + .fnt/.xml/.json，已配 skill。**P3 字体工具四项至此全部做完**。
+- **下一步**：可选 #20 音频工具（复用 ffmpeg）、#21 host 工具。待用户定。
+- **待人工验**：#18 的图集观感只有人能判断 —— 生成后把 `.fnt` + PNG 丢进 Pixi 或在线 BMFont 查看器确认渲染正确。
 
 ---
 
@@ -45,16 +46,17 @@
 |---|------|------|-------|------|
 | F | 文件统计（按后缀数量/大小 + 明细） | ✅ | ✅ | review 通过 |
 | 12 | 批量重命名 | 🔵 | ✅ | 可拖拽规则链 + 零 IPC 预览 + 撤销 |
-| 13 | word 转 pdf | ⬜ | ⬜ | |
-| 14 | pdf 转 word | ⬜ | ⬜ | |
-| 15 | excel | ⏸ | - | 需求待定 |
+| 15 | excel 多语言转 JSON | 🔵 | ✅ | 待 review；exceljs 单表多 sheet 合并 → 一种语言一个 JSON，点号转嵌套 |
+
+> ~~#13 word 转 pdf / #14 pdf 转 word~~ 已于 2026-08-26 取消（纯本地高保真转换依赖 LibreOffice/Office COM，代价大、性价比低）。
 
 ### P3 · 字体工具 — M4
 | # | 功能 | 状态 | skill | 备注 |
 |---|------|------|-------|------|
-| 16 | 字体裁剪 | ⬜ | ⬜ | |
-| 17 | 字体格式转换 | ⬜ | ⬜ | |
-| 18 | 位图字体（图集+.fnt） | ⬜ | ⬜ | 较复杂 |
+| 16 | 字体裁剪 | 🔵 | ✅ | 待 review；subset-font 按字符裁+可选转格式 + fontkit 元信息 + 批量 + FontFace 实时预览 |
+| - | 字体网页分包 | 🔵 | ✅ | 待 review；cn-font-split 独立页 /font/split，单字体切多 unicode-range 分包+CSS |
+| 17 | 字体格式转换 | 🔵 | ✅ | 待 review；独立页 /font/convert，fontverter 无损转 TTF/WOFF/WOFF2（不做 otf） |
+| 18 | 位图字体（图集+.fnt） | 🔵 | ✅ | 待 review；双 tab /font/bitmap，字体→位图 + 图片→位图，出 PNG 图集 + .fnt/.xml/.json 三格式 |
 
 ### P4 · 媒体工具 — M5
 | # | 功能 | 状态 | skill | 备注 |
@@ -105,6 +107,7 @@
 **文件工具（2026-08）**
 - #F 文件统计：**扫描一次拿全量，包含/排除后缀在前端过滤**（改条件不重扫）；`ScanFileEntry` 用 dirIndex 引用去重目录表（十万级文件不重复存长路径）；CSV 写 BOM 防 Excel 乱码。
 - #12 批量重命名（**全仓库唯一直接改用户原始文件**，无「输出到新目录」退路）：预览**完全不走 IPC**（纯字符串运算放 computed，与图片预览那套相反）；pre-flight **不过就整批不动**；两趟改名（`.tbtmp-<i>` 中转）仅在目标集合∩源集合≠∅时启用。Windows 实测：结尾点/空格能创建但资源管理器处理不掉故要拦、`CON.txt` 能创建但按名读会挂死、`fs.rename` 静默覆盖、NTFS `existsSync` 大小写不敏感会拦下大小写修正。给规则链加 kind 必须同步 `normalizeRules()` 迁移老 localStorage。
+- `2026-08-28` **#15 Excel 多语言转 JSON**（独立页 `/file/excel-i18n`）：新依赖 **exceljs**（4.4.0 MIT，纯 JS、主进程用、externalize 无 asarUnpack，但**必须在 dependencies**）；排除 SheetJS xlsx（npm 只有 0.18.5 旧版有 CVE，安全版要从官方 CDN 装，偏离仓库惯例）。**最大坑：`cell.value` 有七种形态**（string/number/boolean/Date/`{richText}`/`{formula,result}`/`{hyperlink,text}`/`{error}`），直接 `String()` 会把富文本和公式单元格变成 `[object Object]`——翻译表加粗几个字或用公式拼串很常见，必须逐形态归一（判定顺序 richText→result→text，超链接也有 text 会误取）。`.csv` 要走 `wb.csv.readFile` 分流，**不支持老 .xls**。**语言码解析取「第一个 ASCII 段起到结尾的所有 ASCII 段」**：`中文原文-zh-hants`→`zh-hants`，只取最后一段会得到 `hants`。点号嵌套冲突（先有 `a.b` 又来 `a`）**不静默覆盖**、返回 false 汇总 warning。`keyCount` 递归数叶子而非 `Object.keys().length`（嵌套后顶层 key 数远小于译文条数）。**预览只序列化被请求的一列**（几十个语言全量 JSON 过 IPC 又大又慢），且预览与落盘共用同一 `buildLocales` 保证所见即所写；预览不 watch 自动重算、置 stale 提示点刷新（同精灵图）。空译文不落 key（前端回退默认语言）、空 key 行整行跳过并计数。**多 excel 合并明确不做**（用户定：各表语言列位置不一致，逐文件配行列成本高于收益）；多 sheet 合并支持。列引用同时接受 `C` 与 `3`。**验证用 esbuild 打包法**（仓库首次）：只替换 excel.ts 里 channels/helper 两行 import 为桩、其余逐字保留，`--external:exceljs` 出 mjs 后 node 直跑，测的是生产代码本身；79 断言过（主进程 48 + 渲染纯函数 31）。见 skill excel-i18n。
 
 **通用：文件夹导入 + 分页（2026-08-20，图片四页 + 重命名共用）**
 - 收敛成一个 `useFolderImport`（复用 #12 的 `scanDirApi + maxDepth`）。**扩展名过滤必须在主进程遍历时做且放在 maxFiles 计数之前**（否则扫代码目录会被几千个 .js 占满名额）。列表**受控分页**每页 50 + 缩略图只为当前页加载 + `taskQueue` 限并发 4（否则文件夹导入上千张 = 上千并发解码卡死）。受控分页的代价：**表格不能开内部列排序**（切片按 items 顺序，重排就对不上）。「含子文件夹」放工具栏复选框（影响的是下次点添加的动作，与面板参数不同类）。
@@ -115,3 +118,10 @@
 
 **工程 / 打包**
 - `2026-08-21` **electron-builder 接入**：**两条命令、输出分开**——`pnpm build:dir` 出免安装 `release/unpacked/win-unpacked`（`--dir` 跳过 installer，快），`pnpm build:setup` 出 `release/installer/` 下 NSIS 安装包 + portable（各自 `-c.directories.output` 覆盖）。均先 typecheck + electron-vite build。配置在 `electron-builder.yml`。**原生模块 asarUnpack**：`sharp`/`@img`（sharp .node）、`@ffmpeg-installer`/`@ffprobe-installer`（.exe）——不解包则 asar 内无法 require/spawn；实测都落在 `app.asar.unpacked`。**统一图标**取标题栏的 `CubeOutline`：`build/icon.svg` → sharp 渲成 `build/icon.png`+`public/icon.png`，electron-builder 自动生成 .ico 并嵌入 exe（旧图标是 Windows 图标缓存未刷新，非配置问题），窗口/favicon/安装包三处同源，换图标只改 svg 重渲。pnpm 10+ 不装其它平台可选二进制，打包 warn 一串非本平台的包可忽略。见 skill packaging。
+
+**字体工具**
+- `2026-08-26` **#16 字体裁剪**（第一轮，按字符裁单文件）：新依赖 **subset-font**（harfbuzz WASM 裁剪）+ **fontkit**（读元信息），纯 JS/WASM、主进程用、externalize 无 asarUnpack。`subsetFont(buf,chars,{targetFormat})` 的 targetFormat 只认 `truetype/sfnt/woff/woff2`（ttf→truetype、otf→sfnt）。三来源字符集合并去重（手输+文件提取+预设 charset.ts，滤掉换行）覆盖 #17 格式转换。**FontFace 实时预览**（用户要求）：`subsetPreview` 固定 woff2 → data URL → `new FontFace` 挂载渲染保留字符，缺字露豆腐块正好验证按字符裁；需 CSP 加 `font-src 'self' data:`，切换/卸载 `document.fonts.delete` 防累积。另加通用 `file:readText`。脚本验证 8 断言（含「只裁 A 时『世』落 .notdef」证明真按字符裁 + 四格式魔数）。**网页分包（cn-font-split）留第二轮**——与 subset-font 目标不同（分包+CSS vs 指定字符裁单文件）。见 skill font-subset。
+- `2026-08-26` **字体网页分包**（#16 第二轮）：新依赖 **cn-font-split**（Rust FFI via koffi）独立路由页 `/font/split`，把大字体切成多个 unicode-range 分包 + CSS。**关键坑：包里不自带二进制**——`libffi-<平台>.dll` 由 postinstall 从 GitHub releases 下载；pnpm 默认忽略 postinstall，须把 `cn-font-split` 加进 `pnpm.onlyBuiltDependencies` 才自动拉，否则 FFI load 报错。打包 asarUnpack 加 `cn-font-split/**` + `koffi/**`（原生二进制），且只覆盖打包机平台。字段坑：`languageAreas`(复数)/`testHtml`/`targetType`(字符串)。单字体流程页（非批量列表），产物落「输出目录/字体名/」子目录。脚本验证 arial 切 47 分包+CSS(含 @font-face/unicode-range)+testHtml，160ms。见 skill font-split。
+- `2026-08-26` **分包多格式输出**（font-split 增强）：实测 cn-font-split **只出 woff2**（targetType 无效），要 woff/ttf 回退用 **subset-font 逐 chunk 转格式**——读 chunk woff2 的完整字符集(`fontkit.characterSet`)喂 subset-font 才不丢字，再**重写 CSS 的 src** 为 `woff2,woff,truetype` 多 url 回退(format 关键字 ttf→truetype)。「保留原格式」按源扩展名并入。曾误做成多格式分目录，已纠正为单目录单 CSS + src 多格式。搜索确认无单库能「分包+多格式+CSS」(subfont/glyphhanger 不多分包或依赖 Python)，故 cn-font-split(分包)+subset-font(转格式) 组合。脚本 37 断言过（三格式齐全/不丢字/src 顺序）。**woff2 后改为同样可选**：分包必先产 woff2（库限制），未勾则转完其它格式后删掉 woff2 中间文件、CSS src 也不含它；全不选时前端禁开始、主进程兜底留 woff2。脚本另验「只勾 ttf」4 断言。
+- `2026-08-28` **#17 字体格式转换**（独立页 `/font/convert`）：**实测否掉了 PLAN 原「subset-font 传全字符即纯转换、可并入 #16」的判断**，两条硬结论。① **subset-font 不转字形轮廓**：ttf 源传 `targetFormat:'sfnt'`(otf) 返回字节与 `'truetype'` 完全相同（同 sha1、魔数仍 `00010000`），OTTO 源不论传什么仍是 OTTO——ttf⇄otf 要重建全部轮廓（glyf↔CFF），现有依赖做不到，故**本页不给 OTF 选项**（给个实际输出 ttf 字节的「otf」是骗人），面板写明原因；OTTO 源勾 ttf 产物仍是 OTTO 这一限制也如实记录、不假装。② **「传全字符」会丢字形**：arial 4503 个字形喂全 `characterSet` 只剩 4161（丢 342，连字/异体字只经 GSUB 可达、cmap 无码位）。故转换改用 **`fontverter`**（本是 subset-font 的传递依赖，**仍要显式进 dependencies**，否则 subset-font 升级会静默炸 + externalizeDepsPlugin 只认 dependencies），API 仅 `detectFormat`/`convert`，纯 JS/WASM **无需 asarUnpack**、无 .d.ts 靠 `noImplicitAny:false` 通过（同 subset-font/fontkit）；三格式全部 4503 字形无损。**裁剪页继续用 subset-font（那里丢字形正是目的）**。四个坑：`.ttc` 提前判 `ttcf` 魔数给中文提示（否则 fontverter 抛无意义的英文 signature 错）、**目标路径 === 源路径时记 skipped 绝不原地重写**（毁源风险）、临时文件+rename、同格式转同格式仍照写（0ms 直通=拷贝，不做聪明省略）。**进度只到「第几个格式」粒度**：`convert` 是不可分割的 async 调用无回调，**不编造百分比**；因一格式一推故不需 300ms 节流（区别于 ffmpeg 每秒几十行）。取消无子进程可杀、只置标记在循环开头查，**正在编码的格式会跑完**（woff2 大字体最长 ~12s），`canceled` 不是错误、行退回 pending（`TaskStatus` 无 canceled 态）。woff2 慢是硬约束（simhei 9.7MB → 11.7s）故严格串行。`registerFontIpc()` 由无参改为收 `win`。脚本 44 断言过（含无损对照组、OTTO 限制、不毁源 sha1+mtime、round-trip、覆盖两向、取消两时机），另在**真实 Electron 主进程**验 fontverter 能加载 WASM。见 skill font-convert。
+- `2026-08-31` **#18 位图字体**（双 tab 页 `/font/bitmap`，字体工具收官）：**零新依赖**——fontkit（已有）取字形路径与度量 + sharp（已有）读 SVG 出 PNG，仓库此前没有任何字形栅格化能力，全靠实测把风险排掉。排除 `msdf-bmfont-xml`（拖 jimp/opentype.js/handlebars/update-notifier/cli-progress，只为它几十行的 packer + fnt writer 不值）。**PLAN 原文只写了「图片 + 字符映射」一个方向，实际主流需求是反向的（从 ttf 烘），用户定两个都做同页两 tab**；字体→位图的字符集收集与 #16 裁剪**完全同构**（手输 + txt/json 提取 + 预设，三来源合并去重）。五条实测结论：① **必须整页一个 SVG，不能逐字形 composite**——3500 CJK 13524ms→600ms（22×）且两法**像素完全相同**（差异 0），验证脚本第 2 条就是守这个的；② **bbox 取整必须分轴 floor/ceil**，我第一版 `ceil(maxX-minX)` 左右各丢半像素、导致按度量摆放与整串排版差 518 个像素（max 226），arial 65 个字形里 32 个受影响，改分轴后归零；③ **缺字只能用 `hasGlyphForCodePoint()`**——`layout('中')` 在 arial 上返回 id=0 但 `glyph.codePoints` 是上次调用残留的 `[20013]`，照它判断会给用户一张全豆腐块的图集；④ 描边 bbox = glyph bbox ± strokeWidth **刚好够**（`paint-order="stroke"` 让描边在填充下面，`stroke-width` 在字形坐标系要 `/scale` 且 `×2`），7 个字形实测 ink 尺寸 === 声明尺寸；⑤ **高度降序 shelf 不复用 image.ts 的固定网格**（94 ASCII @48px：网格 28.4% vs shelf 79.7% 满页），**但占用率这数要会读**——它随页宽与末页装载量剧烈变化（1024 宽摊成扁长条 58.4%、256 宽分两页拉到 55.5%），别拿单个数字当回归断言。描述文件 **.fnt/.xml/.json 同源三编码**（Cocos/Unity/LibGDX、Pixi、Phaser 各吃一种）；**`scaleW/scaleH` 是 common 行的全局字段不是 per-page**，故各页尺寸统一取最大值，否则引擎在非首页整体错位。kerning 用成对 `layout()` 差值反推（fontkit 无公开读表 API），95 ASCII → 9025 次 / 84ms / 95 对，**硬限 200 字符**（3755 汉字是 1410 万对，且 CJK 本无 kerning），前端禁用 + 主进程兜底。落盘 `writeAllAtomic` 全成才留——**缺一页 PNG 的 .fnt 是坏数据**，引擎渲空白字比什么都没有更难查。**顺手修掉 `COMMON_HANZI_3500` 名实不符**（实际 322 字、去重 306、有重复字；裁剪场景只是少裁几个字，位图场景字数直接决定图集页数与耗时），换成可程序化推导校验的 `COMMON_HANZI_GB2312_L1`（0xB0A1–0xD7F9，末行只到 0xF9，3755 字）。**验证 esbuild 打包法 12 组 46 断言全绿**（只换 `./helper` 一处 import 为记录型桩，连 `registerBitmapFontIpc` 一起验），**抓到一个真 bug**：末页渲染期间收到的取消循环里查不到（没有下一轮），两页任务会照样落盘一整套——循环后补一查，`generateFromFont`/`packImages` 都加。自己踩的两个断言坑：参照排版必须也用整数前进量（BMFont `xadvance` 按规范是整数，拿浮点比只量得到量化误差）、断言占用率前先确认没分页。基准：3755 CJK @48px pageSize=2048 → 2 页 2048×2037，度量+装箱 178ms、出图 742ms。见 skill font-bitmap。

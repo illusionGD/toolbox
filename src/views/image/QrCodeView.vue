@@ -1,5 +1,9 @@
 <template>
-  <ToolPageLayout title="二维码" desc="批量生成二维码，或批量解析图片中的二维码" category="图片工具">
+  <ToolPageLayout
+    title="二维码"
+    desc="批量生成二维码，或批量解析图片中的二维码"
+    category="图片工具"
+  >
     <template #toolbar>
       <n-tabs v-model:value="tab" type="segment" size="small" class="qr__tabs">
         <n-tab name="generate">生成二维码</n-tab>
@@ -50,7 +54,8 @@
                   :placeholder="`名称`"
                 />
                 <figcaption class="qr__cell-text" :title="item.text">
-                  <span v-if="!isValid(item.text)" class="qr__cell-badge">校验不符</span>{{ item.text }}
+                  <span v-if="!isValid(item.text)" class="qr__cell-badge">校验不符</span
+                  >{{ item.text }}
                 </figcaption>
               </figure>
             </div>
@@ -63,12 +68,7 @@
       </div>
 
       <!-- 解析：分页文件列表 -->
-      <div
-        v-else
-        class="qr__list"
-        :class="{ 'qr__list--drag': isDragOver }"
-        v-bind="dropHandlers"
-      >
+      <div v-else class="qr__list" :class="{ 'qr__list--drag': isDragOver }" v-bind="dropHandlers">
         <div class="qr__bar">
           <n-button size="small" type="primary" @click="handleAddFiles">
             <template #icon><n-icon :component="CloudUploadOutline" /></template>
@@ -79,10 +79,20 @@
             添加文件夹
           </n-button>
           <n-checkbox v-model:checked="decodeRecursive" class="qr__dim">含子文件夹</n-checkbox>
-          <n-button size="small" quaternary :disabled="!decodeChecked.length" @click="handleRemoveChecked">
+          <n-button
+            size="small"
+            quaternary
+            :disabled="!decodeChecked.length"
+            @click="handleRemoveChecked"
+          >
             移除选中{{ decodeChecked.length ? `(${decodeChecked.length})` : '' }}
           </n-button>
-          <n-button size="small" quaternary :disabled="!decodeItems.length" @click="handleClearDecode">
+          <n-button
+            size="small"
+            quaternary
+            :disabled="!decodeItems.length"
+            @click="handleClearDecode"
+          >
             清空
           </n-button>
         </div>
@@ -142,8 +152,18 @@
         <div class="qr__field">
           <label class="qr__label">前景色 / 背景色</label>
           <div class="qr__pair">
-            <n-color-picker v-model:value="genConfig.dark" size="small" :show-alpha="false" :modes="['hex']" />
-            <n-color-picker v-model:value="genConfig.light" size="small" :show-alpha="false" :modes="['hex']" />
+            <n-color-picker
+              v-model:value="genConfig.dark"
+              size="small"
+              :show-alpha="false"
+              :modes="['hex']"
+            />
+            <n-color-picker
+              v-model:value="genConfig.light"
+              size="small"
+              :show-alpha="false"
+              :modes="['hex']"
+            />
           </div>
         </div>
         <div class="qr__field">
@@ -173,13 +193,22 @@
               placeholder="粘贴或选择输出目录"
               :status="outputDirStatus"
             />
-            <n-button size="small" @click="pickGenDir"><n-icon :component="FolderOpenOutline" /></n-button>
+            <n-button size="small" @click="pickGenDir"
+              ><n-icon :component="FolderOpenOutline"
+            /></n-button>
           </div>
           <p v-if="outputDirStatus === 'error'" class="qr__tip qr__tip--warn">
             路径格式不正确（需为绝对路径，如 C:\output 或 /home/user/out）
           </p>
         </div>
-        <n-button type="primary" block class="qr__mt" :loading="generating" :disabled="!canGenerate" @click="handleGenerate">
+        <n-button
+          type="primary"
+          block
+          class="qr__mt"
+          :loading="generating"
+          :disabled="!canGenerate"
+          @click="handleGenerate"
+        >
           生成 ({{ validItems.length }})
         </n-button>
       </template>
@@ -222,7 +251,13 @@
 
   <!-- 二维码放大预览（多张可左右切换） -->
   <n-modal v-model:show="previewShow">
-    <n-card class="qr__modal" :title="previewTitle" size="small" closable @close="previewShow = false">
+    <n-card
+      class="qr__modal"
+      :title="previewTitle"
+      size="small"
+      closable
+      @close="previewShow = false"
+    >
       <div class="qr__modal-body">
         <n-button
           v-if="genItems.length > 1"
@@ -523,7 +558,12 @@ async function loadPreview(index: number): Promise<void> {
     light: genConfig.light,
   }).catch(() => '');
   // 期间用户可能已关窗或切到别的码，核对索引与内容再替换
-  if (previewShow.value && previewIndex.value === index && genItems.value[index]?.text === text && url) {
+  if (
+    previewShow.value &&
+    previewIndex.value === index &&
+    genItems.value[index]?.text === text &&
+    url
+  ) {
     previewSrc.value = url;
   }
 }
@@ -660,7 +700,9 @@ const decodeColumns: DataTableColumns<QrDecodeItem> = [
             src: row.thumbnail,
             style: 'width:36px;height:36px;object-fit:contain;border-radius:4px;display:block;',
           })
-        : h('div', { style: 'width:36px;height:36px;border-radius:4px;background:var(--tb-bg-hover);' }),
+        : h('div', {
+            style: 'width:36px;height:36px;border-radius:4px;background:var(--tb-bg-hover);',
+          }),
   },
   { title: '文件名', key: 'name', width: 180, ellipsis: { tooltip: true } },
   {
@@ -669,7 +711,8 @@ const decodeColumns: DataTableColumns<QrDecodeItem> = [
     ellipsis: { tooltip: true },
     render: (row) => {
       if (!row.decoded) return h('span', { style: 'color:var(--tb-text-secondary)' }, '—');
-      if (!row.result) return h('span', { style: 'color:var(--tb-text-secondary)' }, '未识别到二维码');
+      if (!row.result)
+        return h('span', { style: 'color:var(--tb-text-secondary)' }, '未识别到二维码');
       return row.result;
     },
   },

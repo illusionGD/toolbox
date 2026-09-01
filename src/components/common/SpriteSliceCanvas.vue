@@ -8,7 +8,12 @@
       @dblclick="handleDblClick"
     >
       <img :src="src" class="slice-canvas__img" alt="精灵表" draggable="false" />
-      <canvas ref="canvasRef" class="slice-canvas__overlay" :width="stage.width" :height="stage.height" />
+      <canvas
+        ref="canvasRef"
+        class="slice-canvas__overlay"
+        :width="stage.width"
+        :height="stage.height"
+      />
 
       <!-- 手动切割线：可拖，双击删除 -->
       <template v-if="editable">
@@ -188,8 +193,14 @@ function pointToImage(clientX: number, clientY: number): { x: number; y: number 
 function handleDblClick(event: MouseEvent): void {
   if (!props.editable) return;
   const { x, y } = pointToImage(event.clientX, event.clientY);
-  emit('update:columns', [...props.columns, Math.round(x)].sort((a, b) => a - b));
-  emit('update:rows', [...props.rows, Math.round(y)].sort((a, b) => a - b));
+  emit(
+    'update:columns',
+    [...props.columns, Math.round(x)].sort((a, b) => a - b),
+  );
+  emit(
+    'update:rows',
+    [...props.rows, Math.round(y)].sort((a, b) => a - b),
+  );
 }
 
 /**
@@ -225,11 +236,17 @@ function startDragLine(event: PointerEvent, kind: 'col' | 'row', index: number):
     if (d.kind === 'col') {
       const next = [...props.columns];
       next[d.index] = d.value;
-      emit('update:columns', next.sort((a, b) => a - b));
+      emit(
+        'update:columns',
+        next.sort((a, b) => a - b),
+      );
     } else {
       const next = [...props.rows];
       next[d.index] = d.value;
-      emit('update:rows', next.sort((a, b) => a - b));
+      emit(
+        'update:rows',
+        next.sort((a, b) => a - b),
+      );
     }
   };
   window.addEventListener('pointermove', move);
@@ -240,8 +257,16 @@ function startDragLine(event: PointerEvent, kind: 'col' | 'row', index: number):
 
 /** 删除切割线。 */
 function removeLine(kind: 'col' | 'row', index: number): void {
-  if (kind === 'col') emit('update:columns', props.columns.filter((_, i) => i !== index));
-  else emit('update:rows', props.rows.filter((_, i) => i !== index));
+  if (kind === 'col')
+    emit(
+      'update:columns',
+      props.columns.filter((_, i) => i !== index),
+    );
+  else
+    emit(
+      'update:rows',
+      props.rows.filter((_, i) => i !== index),
+    );
 }
 
 let observer: ResizeObserver | null = null;

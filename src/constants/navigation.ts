@@ -37,8 +37,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     children: [
       { key: 'file-stats', label: '文件统计', path: '/file/stats' },
       { key: 'file-rename', label: '批量重命名', path: '/file/rename' },
-      { key: 'file-word2pdf', label: 'Word 转 PDF', path: '/file/word2pdf' },
-      { key: 'file-pdf2word', label: 'PDF 转 Word', path: '/file/pdf2word' },
+      { key: 'file-excel-i18n', label: 'Excel 多语言', path: '/file/excel-i18n' },
     ],
   },
   {
@@ -47,6 +46,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: TextOutline,
     children: [
       { key: 'font-subset', label: '字体裁剪', path: '/font/subset' },
+      { key: 'font-split', label: '网页分包', path: '/font/split' },
       { key: 'font-convert', label: '格式转换', path: '/font/convert' },
       { key: 'font-bitmap', label: '位图字体', path: '/font/bitmap' },
     ],

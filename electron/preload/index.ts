@@ -2,19 +2,39 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { electronAPI } from '@electron-toolkit/preload';
 import {
   APP_CHANNELS,
+  BITMAP_FONT_CHANNELS,
   DIALOG_CHANNELS,
+  EXCEL_CHANNELS,
   FILE_CHANNELS,
+  FONT_CHANNELS,
   IMAGE_CHANNELS,
   VIDEO_CHANNELS,
   WINDOW_CHANNELS,
 } from '../shared/channels';
 import type {
   AutoCropOptions,
+  BitmapFontOptions,
+  BitmapFontPackOptions,
+  BitmapFontPreview,
+  BitmapFontProgress,
+  BitmapFontResult,
   CompressOptions,
   CompressResult,
   CropOptions,
   CropProbe,
   CropResult,
+  ExcelI18nOptions,
+  ExcelI18nPreviewResult,
+  ExcelI18nWriteResult,
+  ExcelProbeResult,
+  FontConvertOptions,
+  FontConvertProgress,
+  FontConvertResult,
+  FontMeta,
+  FontSplitOptions,
+  FontSplitResult,
+  FontSubsetOptions,
+  FontSubsetResult,
   IpcResponse,
   OpenFilesOptions,
   PickedFile,
@@ -137,6 +157,13 @@ const api = {
      */
     saveText: (options: SaveTextOptions): Promise<IpcResponse<string | null>> =>
       ipcRenderer.invoke(FILE_CHANNELS.saveText, options),
+    /**
+     * 读取文本文件内容（utf-8）。
+     * @param filePath 文件路径。
+     * @returns 统一响应，data 为文本内容。
+     */
+    readText: (filePath: string): Promise<IpcResponse<string>> =>
+      ipcRenderer.invoke(FILE_CHANNELS.readText, filePath),
     /**
      * 批量重命名（主进程先做 pre-flight，冲突则整批不动）。
      * @param pairs 源路径与新文件名的配对。
@@ -327,6 +354,148 @@ const api = {
       ipcRenderer.on(VIDEO_CHANNELS.transcodeProgress, listener);
       return () => ipcRenderer.off(VIDEO_CHANNELS.transcodeProgress, listener);
     },
+  },
+
+  /** 字体处理（subset-font + fontkit）。 */
+  font: {
+    /**
+     * 读字体元信息（字体名/字形数/大小）。
+     * @param filePath 字体路径。
+     * @returns 统一响应，data 为元信息。
+     */
+    probe: (filePath: string): Promise<IpcResponse<FontMeta>> =>
+      ipcRenderer.invoke(FONT_CHANNELS.probe, filePath),
+    /**
+     * 裁剪预览（只裁不写盘）。
+     * @param filePath 字体路径。
+     * @param chars 要保留的字符集。
+     * @returns 统一响应，data 为 woff2 的 data URL。
+     */
+    subsetPreview: (filePath: string, chars: string): Promise<IpcResponse<string>> =>
+      ipcRenderer.invoke(FONT_CHANNELS.subsetPreview, filePath, chars),
+    /**
+     * 按字符集裁剪字体并落盘。
+     * @param sourcePath 源字体路径。
+     * @param options 裁剪选项。
+     * @returns 统一响应，data 为裁剪结果。
+     */
+    subset: (
+      sourcePath: string,
+      options: FontSubsetOptions,
+    ): Promise<IpcResponse<FontSubsetResult>> =>
+      ipcRenderer.invoke(FONT_CHANNELS.subset, sourcePath, options),
+    /**
+     * 网页分包：一个字体切成多个 unicode-range 分包 + CSS。
+     * @param sourcePath 源字体路径。
+     * @param options 分包选项。
+     * @returns 统一响应，data 为产物摘要。
+     */
+    split: (sourcePath: string, options: FontSplitOptions): Promise<IpcResponse<FontSplitResult>> =>
+      ipcRenderer.invoke(FONT_CHANNELS.split, sourcePath, options),
+    /**
+     * 纯容器格式转换（fontverter，无损不裁剪），一次可产出多个格式。
+     * @param sourcePath 源字体路径。
+     * @param options 转换选项。
+     * @returns 统一响应，data 为转换结果。
+     */
+    convert: (
+      sourcePath: string,
+      options: FontConvertOptions,
+    ): Promise<IpcResponse<FontConvertResult>> =>
+      ipcRenderer.invoke(FONT_CHANNELS.convert, sourcePath, options),
+    /**
+     * 取消进行中的格式转换。
+     * @param taskId 任务 id。
+     * @returns 统一响应，data 恒为 true（只置标记，正在编码的格式仍会跑完）。
+     */
+    cancelConvert: (taskId: string): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(FONT_CHANNELS.cancelConvert, taskId),
+    /**
+     * 订阅格式转换进度。
+     * @param callback 进度回调。
+     * @returns 取消订阅的函数。
+     */
+    onConvertProgress: (callback: (progress: FontConvertProgress) => void): (() => void) => {
+      const listener = (_event: unknown, progress: FontConvertProgress): void => callback(progress);
+      ipcRenderer.on(FONT_CHANNELS.convertProgress, listener);
+      return () => ipcRenderer.off(FONT_CHANNELS.convertProgress, listener);
+    },
+  },
+  /** 位图字体（图集 + BMFont 描述文件）。 */
+  bitmapFont: {
+    /**
+     * 从字体生成图集 + 描述文件并落盘。
+     * @param options 生成选项。
+     * @returns 统一响应，data 为产物摘要。
+     */
+    generate: (options: BitmapFontOptions): Promise<IpcResponse<BitmapFontResult>> =>
+      ipcRenderer.invoke(BITMAP_FONT_CHANNELS.generate, options),
+    /**
+     * 生成预览（只算不写盘）。
+     * @param options 生成选项。
+     * @returns 统一响应，data 为各页预览。
+     */
+    preview: (options: BitmapFontOptions): Promise<IpcResponse<BitmapFontPreview>> =>
+      ipcRenderer.invoke(BITMAP_FONT_CHANNELS.preview, options),
+    /**
+     * 把一组字符图片打包成位图字体。
+     * @param options 打包选项。
+     * @returns 统一响应，data 为产物摘要。
+     */
+    packImages: (options: BitmapFontPackOptions): Promise<IpcResponse<BitmapFontResult>> =>
+      ipcRenderer.invoke(BITMAP_FONT_CHANNELS.packImages, options),
+    /**
+     * 取消进行中的生成。
+     * @param taskId 任务 id。
+     * @returns 统一响应，data 恒为 true（只置标记，正在栅格化的页会跑完）。
+     */
+    cancel: (taskId: string): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(BITMAP_FONT_CHANNELS.cancel, taskId),
+    /**
+     * 订阅生成进度。
+     * @param callback 进度回调。
+     * @returns 取消订阅的函数。
+     */
+    onProgress: (callback: (progress: BitmapFontProgress) => void): (() => void) => {
+      const listener = (_event: unknown, progress: BitmapFontProgress): void => callback(progress);
+      ipcRenderer.on(BITMAP_FONT_CHANNELS.progress, listener);
+      return () => ipcRenderer.off(BITMAP_FONT_CHANNELS.progress, listener);
+    },
+  },
+  /** Excel 多语言表转 i18n JSON。 */
+  excel: {
+    /**
+     * 探测工作簿结构（sheet 名 / 表头行各列文字 / 行列数）。
+     * @param filePath 表格路径。
+     * @param headerRow 表头行行号（1-based）。
+     * @returns 统一响应，data 为结构信息。
+     */
+    probe: (filePath: string, headerRow: number): Promise<IpcResponse<ExcelProbeResult>> =>
+      ipcRenderer.invoke(EXCEL_CHANNELS.probe, filePath, headerRow),
+    /**
+     * 转换预览（只算不写盘）：全部列的统计 + 指定列的 JSON 文本。
+     * @param filePath 表格路径。
+     * @param options 转换选项。
+     * @param previewColumn 要预览的列号（1-based）。
+     * @returns 统一响应，data 为统计与单列 JSON。
+     */
+    preview: (
+      filePath: string,
+      options: ExcelI18nOptions,
+      previewColumn: number,
+    ): Promise<IpcResponse<ExcelI18nPreviewResult>> =>
+      ipcRenderer.invoke(EXCEL_CHANNELS.preview, filePath, options, previewColumn),
+    /**
+     * 转换并落盘：一种语言一个 JSON。
+     * @param filePath 表格路径。
+     * @param options 转换选项。
+     * @returns 统一响应，data 为产物摘要。
+     */
+    toJson: (
+      filePath: string,
+      options: ExcelI18nOptions,
+    ): Promise<IpcResponse<ExcelI18nWriteResult>> =>
+      ipcRenderer.invoke(EXCEL_CHANNELS.toJson, filePath, options),
   },
 };
 

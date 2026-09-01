@@ -14,6 +14,11 @@ import ImageSpriteView from '@/views/image/ImageSpriteView.vue';
 import QrCodeView from '@/views/image/QrCodeView.vue';
 import FileStatsView from '@/views/file/FileStatsView.vue';
 import RenameView from '@/views/file/RenameView.vue';
+import ExcelI18nView from '@/views/file/ExcelI18nView.vue';
+import FontSubsetView from '@/views/font/FontSubsetView.vue';
+import FontSplitView from '@/views/font/FontSplitView.vue';
+import FontConvertView from '@/views/font/FontConvertView.vue';
+import BitmapFontView from '@/views/font/BitmapFontView.vue';
 import SpinePreviewView from '@/views/media/SpinePreviewView.vue';
 import VideoCompressView from '@/views/media/VideoCompressView.vue';
 
@@ -29,6 +34,11 @@ const TOOL_COMPONENTS: Record<string, Component> = {
   'image-qrcode': QrCodeView,
   'file-stats': FileStatsView,
   'file-rename': RenameView,
+  'file-excel-i18n': ExcelI18nView,
+  'font-subset': FontSubsetView,
+  'font-split': FontSplitView,
+  'font-convert': FontConvertView,
+  'font-bitmap': BitmapFontView,
   'media-spine': SpinePreviewView,
   'media-video': VideoCompressView,
 };
