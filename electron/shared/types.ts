@@ -913,11 +913,17 @@ export interface TranscodeOptions {
   /** 是否覆盖原文件。 */
   overwrite: boolean;
   /**
-   * 时间剪切区间（秒）。本轮不接入 UI，为下一轮的裁剪页预留，
-   * 使两页共用同一个 transcodeOne，不必改签名。
+   * 输出文件名后缀，拼在原名之后（如 `-clip` → `a-clip.mp4`）。
+   *
+   * 剪切页默认给 `-clip`：剪一段还放回源目录是最自然的操作，没有后缀就会
+   * 撞上源文件名。同路径守卫是兜底报错，后缀才是让这件事正常走通的路径。
+   */
+  nameSuffix?: string;
+  /**
+   * 时间剪切区间（秒）。压缩 tab 不用，剪切 tab 用，两者共用同一个 transcodeOne。
    */
   trim?: { start: number; end: number };
-  /** 画面裁剪矩形（源像素坐标）。同 trim，为下一轮预留。 */
+  /** 画面裁剪矩形（源像素坐标）；下发前会被 snapCropEven 偶数对齐。 */
   crop?: CropRect;
 }
 

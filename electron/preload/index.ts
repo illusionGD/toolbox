@@ -337,6 +337,15 @@ const api = {
     thumbnail: (filePath: string): Promise<IpcResponse<string>> =>
       ipcRenderer.invoke(VIDEO_CHANNELS.thumbnail, filePath),
     /**
+     * 抽任意时间点的一帧（胶片条时间轴用）。
+     * @param filePath 视频路径。
+     * @param atSeconds 时间点秒。
+     * @param width 输出宽度 px（高度按比例）。
+     * @returns 统一响应，data 为 jpeg data URL。
+     */
+    frame: (filePath: string, atSeconds: number, width: number): Promise<IpcResponse<string>> =>
+      ipcRenderer.invoke(VIDEO_CHANNELS.frame, filePath, atSeconds, width),
+    /**
      * 转码单个视频。
      * @param sourcePath 源文件路径。
      * @param options 转码选项（含 taskId，用于取消与进度关联）。

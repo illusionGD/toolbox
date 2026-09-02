@@ -1,8 +1,27 @@
 <template>
   <div class="waveform">
-    <div ref="stripRef" class="waveform__strip" @pointerdown="handleStripPointerDown">
-      <img v-if="src" :src="src" class="waveform__img" alt="波形" draggable="false" />
-      <div v-else class="waveform__ph">波形生成中…</div>
+    <div
+      ref="stripRef"
+      class="waveform__strip"
+      :class="{ 'waveform__strip--stacked': frames.length > 0 }"
+      @pointerdown="handleStripPointerDown"
+    >
+      <!-- 缩略图胶片条：视频剪切用，等宽平铺，未取到的格子留底色不显示破图 -->
+      <div v-if="frames.length" class="waveform__frames">
+        <span
+          v-for="(frame, index) in frames"
+          :key="index"
+          class="waveform__frame"
+          :style="frame ? { backgroundImage: `url(${frame})` } : undefined"
+        />
+      </div>
+
+      <div v-if="src || !frames.length" class="waveform__wave">
+        <img v-if="src" :src="src" class="waveform__img" alt="波形" draggable="false" />
+        <!-- 有胶片条却没波形图时不显示这句：那是无音轨的视频，说「生成中」是谎报，
+             由页面在别处说明 -->
+        <div v-else class="waveform__ph">波形生成中…</div>
+      </div>
 
       <!-- 分段标记：按静音分割 / 平均分段产出的候选段，点一下可启用/停用 -->
       <div
@@ -58,6 +77,10 @@ import type { SilenceRange } from '@shared/types';
  * 渲染时乘 scale；这里存**秒**、渲染时换成百分比。原因是波形图不是「有原始尺寸的
  * 图片」——它由 ffmpeg 按任意宽度现画再横向拉满容器，没有一个「原始像素」可锚定，
  * 百分比才是唯一不会随容器宽度漂移的表示。
+ *
+ * 传了 `frames` 就变成「胶片条 + 波形」上下两层的视频时间轴。选区、候选段、播放头
+ * 都是 `top:0;bottom:0`，**自然跨满两层**，拖拽那套逻辑一行都不用改——这也正是不
+ * 另写一个视频时间轴组件的原因：重写只会有两份要同步的拖拽代码。
  */
 
 /** 一个带启用标记的候选片段。 */
@@ -67,7 +90,7 @@ export interface WaveformSegment extends SilenceRange {
 }
 
 interface Props {
-  /** 波形图 data URL；为空时显示占位。 */
+  /** 波形图 data URL；为空时显示占位（`frames` 非空时不显示占位）。 */
   src: string;
   /** 音频总时长秒。 */
   duration: number;
@@ -77,9 +100,19 @@ interface Props {
   segments?: WaveformSegment[];
   /** 播放头位置秒；0 表示不显示。 */
   playhead?: number;
+  /**
+   * 等时间间隔的缩略图 data URL 列表（视频时间轴用）。
+   *
+   * 允许含空串占位：抽帧是逐帧异步回来的，先摆好格子再逐个填，条的宽度不会跳。
+   */
+  frames?: string[];
 }
 
-const props = withDefaults(defineProps<Props>(), { segments: () => [], playhead: 0 });
+const props = withDefaults(defineProps<Props>(), {
+  segments: () => [],
+  playhead: 0,
+  frames: () => [],
+});
 
 const emit = defineEmits<{
   'update:modelValue': [value: SilenceRange | null];
@@ -319,6 +352,40 @@ function handleResizePointerDown(event: PointerEvent, edge: 'start' | 'end'): vo
     border-radius: var(--tb-radius-md);
     touch-action: none;
     user-select: none;
+
+    // 胶片条模式：高度改由内容决定（胶片行 + 波形行上下叠）
+    &--stacked {
+      height: auto;
+    }
+  }
+
+  &__frames {
+    display: flex;
+    height: 54px;
+  }
+
+  &__frame {
+    flex: 1 1 0;
+    // 不给 min-width:0 的话 flex 项会被内容撑开，最后几格挤出容器
+    min-width: 0;
+    background-position: center;
+    background-size: cover;
+    border-right: 1px solid var(--tb-bg-base);
+
+    &:last-child {
+      border-right: none;
+    }
+  }
+
+  // 与胶片条同在时波形矮一些；单独出现时仍占满 96px 的条高
+  &__wave {
+    position: relative;
+    height: 100%;
+
+    .waveform__strip--stacked & {
+      height: 48px;
+      border-top: 1px solid var(--tb-border);
+    }
   }
 
   &__img {

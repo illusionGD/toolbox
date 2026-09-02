@@ -47,7 +47,9 @@ description: Toolbox 视频压缩/转码工具（媒体工具下，P4-19）—�
 - **白名单是唯一安全边界**：只服务 probe 登记过的路径，否则等于开任意文件读取口子。路径规范化小写（Windows 大小写不敏感）。
 - **必须实现 Range**：不支持则 `<video>` 只能从头顺序播、进度条拖不动（下一轮时间剪切页全靠拖进度条选区间）。始终走 `createReadStream` 流式，不 `readFile`，大文件才不会整个进内存。206 分片 + `Content-Range`。
 
-## 渲染页（`src/views/media/VideoCompressView.vue`）
+## 渲染页（`src/views/media/VideoView.vue`）
+
+页面已在下一轮改成双 tab（压缩 / 剪切），本节说的是 `compress` tab；剪切 tab 见 [[video-clip]]。
 
 - 套 ToolPageLayout：操作栏(添加文件/文件夹/含子文件夹/移除选中/清空 + ffmpeg 版本号) + 文件表(缩略图/文件名/分辨率/时长/编码/原大小/处理后/体积变化/状态/操作) + 参数面板 + 底部统计(总时长/原大小/处理后/总体积变化)。
 - **元信息异步填充**：视频的时长/分辨率/编码必须经 ffprobe 一次子进程才拿到（不像图片能从缩略图顺带得出）。`VideoItem` 全部字段可选，`probed` 标记区分「没有音轨」与「还没探测」，未探测显示「—」而非编默认值。
@@ -57,9 +59,9 @@ description: Toolbox 视频压缩/转码工具（媒体工具下，P4-19）—�
 - 预览组件 `src/components/common/VideoPreviewModal.vue`（不复用 ImagePreviewModal，那是「两张 img」语义）：src 走 tb-media；**关闭时必须 `pause()` + 移除 src + `load()`**，只 pause 会让隐藏 video 持有解码器与文件句柄，覆盖原文件再处理同一文件时写入失败。点预览前若未 probed 先补一次，否则协议 403 表现为「点了播不了」。
 - 接线：main/index.ts `registerVideoIpc` + `registerMediaScheme/Protocol`、preload `window.api.video.*`、router `TOOL_COMPONENTS['media-video']`、navigation「媒体工具→视频工具」。
 
-## 为下一轮预留（非缺陷）
+## 已由下一轮接出 UI
 
-`TranscodeOptions.trim`/`crop`、主进程 `buildTrimArgs`/`buildFilters`(crop) 已实现但**面板无 UI**——刻意为下一轮「时间剪切 / 画面裁剪页」预留，使两页共用同一个 `transcodeOne` 不改签名。trim 的 `-ss`/`-t` 放 `-i` 之前（accurate_seek 又快又准，`copy` 时只能落关键帧）；crop 必在 scale 之前（坐标是源像素）。
+`TranscodeOptions.trim`/`crop`、主进程 `buildTrimArgs`/`buildFilters`(crop) 在本轮实现但刻意不接 UI，为下一轮「剪切 / 裁剪 tab」预留，使两个 tab 共用同一个 `transcodeOne` 不改签名。**下一轮已接出，见 [[video-clip]]**——同时修了三处只有接 UI 才会暴露的缺陷（targetSize 用源时长、奇数裁剪被静默改、未开覆盖仍可能盖源），并给 `TranscodeOptions` 加了 `nameSuffix`。trim 的 `-ss`/`-t` 放 `-i` 之前（accurate_seek 又快又准，`copy` 时只能落关键帧且行为随容器不同）；crop 必在 scale 之前（坐标是源像素）。
 
 ## 验证
 

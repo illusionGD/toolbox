@@ -13,6 +13,7 @@ import { probeCapabilities } from '../ffmpeg/binary';
 import { grabFrame, probeVideo } from '../ffmpeg/probe';
 import { cancelFfmpeg, clearCanceled, runFfmpeg } from '../ffmpeg/run';
 import { allowMediaPath } from '../protocol/media';
+import { cropExceedsSource, hasCrop, MIN_CROP_SIZE, snapCropEven } from '../../shared/video';
 import { handle } from './helper';
 
 /** 缩略图取帧的时间点（秒）。 */
@@ -92,10 +93,11 @@ function buildScaleFilter(maxHeight: number, sourceHeight: number): string {
 /**
  * 组视频编码参数。
  * @param options 转码选项。
- * @param meta 源元信息（targetSize 模式要按时长反算码率）。
+ * @param effectiveDuration **产物**时长秒（剪切后的，不是源时长），targetSize
+ * 模式按它反算码率；0 表示未知。
  * @returns 参数数组。
  */
-function buildVideoArgs(options: TranscodeOptions, meta: VideoMeta): string[] {
+function buildVideoArgs(options: TranscodeOptions, effectiveDuration: number): string[] {
   const args = ['-c:v', options.codec];
 
   if (options.codec === 'libvpx-vp9') {
@@ -117,11 +119,14 @@ function buildVideoArgs(options: TranscodeOptions, meta: VideoMeta): string[] {
       break;
     }
     case 'targetSize': {
-      // 单趟按目标体积反算码率，误差约 ±10%（UI 上已如实写明）。
+      // 单趟按目标体积反算码率，误差看画面复杂度（UI 上已如实写明）。
+      // **必须用剪切后的时长**：用源时长会让码率差出整个剪切比例——120s 的源剪 3s
+      // 求 3MB，按源时长算得 -b:v 2458k（产物 1.01 MB），按剪切后时长算得 8192k
+      // （产物 3.67 MB），实测差 3.33 倍即 120/3。
       // 时长未知时退回 CRF——没有时长就无法反算，硬算会得到 Infinity
-      if (meta.duration > 0) {
+      if (effectiveDuration > 0) {
         const audioKbps = options.audioMode === 'remove' ? 0 : options.audioBitrate;
-        const totalKbps = (options.targetSizeMb * 8 * 1024) / meta.duration;
+        const totalKbps = (options.targetSizeMb * 8 * 1024) / effectiveDuration;
         const videoKbps = Math.max(64, Math.round(totalKbps - audioKbps));
         args.push('-b:v', `${videoKbps}k`, '-maxrate', `${videoKbps * 2}k`);
       } else {
@@ -166,6 +171,21 @@ function preflight(
 ): void {
   if (!meta.video) throw new Error('该文件没有视频流，请用音频工具处理');
 
+  // 裁剪框的检查与编码器无关，放在最前面（copy 那条分支会先 return）
+  if (hasCrop(options.crop)) {
+    const crop = snapCropEven(options.crop);
+    if (crop.width < MIN_CROP_SIZE || crop.height < MIN_CROP_SIZE) {
+      throw new Error(`裁剪区域太小，宽高都需要至少 ${MIN_CROP_SIZE} 像素`);
+    }
+    // ffmpeg 越界时既不报错也不提示，只是悄悄把偏移钳回画面内，用户拿到的是
+    // 另一块区域（实测）。既然它不说，就只能我们说
+    if (cropExceedsSource(crop, meta.video.width, meta.video.height)) {
+      throw new Error(
+        `裁剪区域超出画面范围（源 ${meta.video.width}×${meta.video.height}），请重新框选`,
+      );
+    }
+  }
+
   if (container === 'gif') {
     if (options.codec === 'copy') throw new Error('GIF 输出无法「不重新编码」');
     return;
@@ -181,8 +201,18 @@ function preflight(
     if (options.maxFps > 0 && (meta.video.fps || 0) > options.maxFps) {
       throw new Error('「不重新编码」无法同时降帧率，请改选一种编码器，或把帧率上限设为不限');
     }
-    if (options.crop && options.crop.width > 0 && options.crop.height > 0) {
+    if (hasCrop(options.crop)) {
       throw new Error('「不重新编码」无法裁剪画面，请改选一种编码器');
+    }
+    // 剪切 + copy 只能按整包切，起点必须落在关键帧上。**实测结论与容器有关**：
+    // mp4 靠 edit list 保住了准确起点（请求 6.5s 起，首帧与源 6.5s 逐像素一致、
+    // 视频流 90 帧 / 3.000s），而 **mkv 没有 edit list，起点直接退到上一个关键帧**
+    // （同一请求实得 5.0s 起、时长 4.643s 而不是 3.000s）。差出一个关键帧间隔
+    // 而不报错属于「给了用户另一段视频」，必须拦
+    if (options.trim && options.trim.end > options.trim.start && container !== 'mp4') {
+      throw new Error(
+        `「不重新编码」剪切只能落在关键帧上，${container.toUpperCase()} 容器会让起点退到上一个关键帧（实测可差一整个关键帧间隔）。请改选一种编码器，或输出为 MP4`,
+      );
     }
 
     const allowedVideo = CONTAINER_VIDEO_CODECS[container];
@@ -221,7 +251,16 @@ function preflight(
  *
  * 输入侧的 `-ss` 自 ffmpeg 2.1 起默认开 `-accurate_seek`：先按关键帧快速跳，
  * 再解码丢弃到精确起点——**既快又准**，比放在 `-i` 之后逐帧解码好得多。
- * 唯一的例外是 `-c copy`，那时只能落在关键帧上，这是封装格式的硬限制。
+ * 实测重新编码时请求 6.5s–9.5s（关键帧每 5s）得到的**视频流是 90 帧 / 3.000s**、
+ * 首帧就是源的 6.5s。
+ *
+ * 注意容器时长会报 3.020s：那 20ms 是 **aac 音频帧**（1024 样本 @44.1kHz ≈ 23ms）
+ * 切不开而向上对齐，`-an` 后两种模式都是精确的 3.000s。**与 copy 无关**，别把它
+ * 记成剪切不准。
+ *
+ * 唯一的例外是 `-c copy`：只能按整包切，起点必须落在关键帧上。实测**行为随容器
+ * 不同**（mp4 有 edit list，首帧与源 6.5s 逐像素一致；mkv 起点直接退到上一个
+ * 关键帧），故 mp4 之外的容器已被 pre-flight 拦掉。
  * 同放在 `-i` 前的 `-t` 限制的是从该输入读取的时长，语义正是我们要的。
  * @param trim 剪切区间。
  * @returns 参数数组。
@@ -241,8 +280,9 @@ function buildTrimArgs(trim: { start: number; end: number } | undefined): string
  */
 function buildFilters(options: TranscodeOptions, meta: VideoMeta): string {
   const parts: string[] = [];
-  const crop = options.crop;
-  if (crop && crop.width > 0 && crop.height > 0) {
+  // 偶数对齐后再下发，好让面板读数与产物尺寸一致（详见 shared/video.ts）
+  const crop = hasCrop(options.crop) ? snapCropEven(options.crop) : null;
+  if (crop) {
     parts.push(`crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}`);
   }
   const scale = buildScaleFilter(options.maxHeight, crop?.height ?? meta.video?.height ?? 0);
@@ -261,7 +301,7 @@ function buildFilters(options: TranscodeOptions, meta: VideoMeta): string {
  * @param sourcePath 源路径。
  * @param tempPath 临时输出路径。
  * @param options 转码选项。
- * @param meta 源元信息。
+ * @param effectiveDuration 产物时长秒（剪切后的），用于进度百分比。
  * @param onProgress 进度回调。
  * @returns 是否被取消。
  */
@@ -269,23 +309,20 @@ async function transcodeToGif(
   sourcePath: string,
   tempPath: string,
   options: TranscodeOptions,
-  meta: VideoMeta,
+  effectiveDuration: number,
   onProgress: (percent: number, outTime: number, speed: number) => void,
 ): Promise<boolean> {
   const palettePath = `${tempPath}.palette.png`;
   const trim = buildTrimArgs(options.trim);
-  const crop = options.crop;
-  const cropPart =
-    crop && crop.width > 0 && crop.height > 0
-      ? `crop=${crop.width}:${crop.height}:${crop.left}:${crop.top},`
-      : '';
+  const crop = hasCrop(options.crop) ? snapCropEven(options.crop) : null;
+  const cropPart = crop ? `crop=${crop.width}:${crop.height}:${crop.left}:${crop.top},` : '';
   // GIF 必须限 fps 与宽度：1080p30 的十秒视频不限的话能出几百 MB
   const base = `${cropPart}fps=${options.gifFps},scale=${options.gifWidth}:-2:flags=lanczos`;
 
   try {
     const first = await runFfmpeg(
       [...trim, '-i', sourcePath, '-vf', `${base},palettegen=stats_mode=diff`, palettePath],
-      { taskId: options.taskId, duration: meta.duration },
+      { taskId: options.taskId, duration: effectiveDuration },
     );
     if (first.canceled) return true;
 
@@ -304,7 +341,7 @@ async function transcodeToGif(
       ],
       {
         taskId: options.taskId,
-        duration: meta.duration,
+        duration: effectiveDuration,
         onProgress: (p) => onProgress(p.percent, p.outTime, p.speed),
       },
     );
@@ -338,12 +375,29 @@ async function transcodeOne(
   const originalSize = meta.size;
   const nameNoExt = basename(sourcePath, extname(sourcePath));
   const dir = options.overwrite ? dirname(sourcePath) : options.outputDir;
-  const outputPath = join(dir, `${nameNoExt}.${FORMAT_EXT[container]}`);
-  const tempPath = join(dir, `${nameNoExt}.tbtmp.${FORMAT_EXT[container]}`);
+  const stem = `${nameNoExt}${options.nameSuffix ?? ''}`;
+  const outputPath = join(dir, `${stem}.${FORMAT_EXT[container]}`);
+  const tempPath = join(dir, `${stem}.tbtmp.${FORMAT_EXT[container]}`);
+
+  // 没开覆盖却算出了和源同名的输出路径：直接写下去会把源文件悄悄换掉（我们走的是
+  // 临时文件 + rename，ffmpeg 自己那句 "cannot edit existing files in-place"
+  // 拦不住我们）。这是数据丢失，必须拦。剪切场景尤其容易撞上——把 a.mp4 剪一段还
+  // 存回原目录是最自然的操作，所以剪切 tab 默认带 `-clip` 后缀，这里只是兜底
+  if (!options.overwrite && outputPath === sourcePath) {
+    throw new Error(
+      '输出会覆盖源文件，请换一个输出目录、加输出名后缀或改输出格式，或显式开启「覆盖原文件」',
+    );
+  }
 
   // ffmpeg 不会自建输出目录，缺目录时它报的是一句夹在几十行编码信息里的
   // "No such file or directory"，用户根本看不出是目录没建
   await mkdir(dir, { recursive: true });
+
+  // 剪切后的时长：targetSize 反算码率与进度百分比都必须用它而不是源时长
+  const effectiveDuration =
+    options.trim && options.trim.end > options.trim.start
+      ? options.trim.end - options.trim.start
+      : meta.duration;
 
   /** 推进度到渲染进程（窗口已销毁时静默跳过）。 */
   const pushProgress = (percent: number, outTime: number, speed: number): void => {
@@ -359,7 +413,13 @@ async function transcodeOne(
   let canceled = false;
   try {
     if (container === 'gif') {
-      canceled = await transcodeToGif(sourcePath, tempPath, options, meta, pushProgress);
+      canceled = await transcodeToGif(
+        sourcePath,
+        tempPath,
+        options,
+        effectiveDuration,
+        pushProgress,
+      );
     } else {
       const filters = buildFilters(options, meta);
       const args = [
@@ -367,7 +427,9 @@ async function transcodeOne(
         '-i',
         sourcePath,
         ...(filters ? ['-vf', filters] : []),
-        ...(options.codec === 'copy' ? ['-c:v', 'copy'] : buildVideoArgs(options, meta)),
+        ...(options.codec === 'copy'
+          ? ['-c:v', 'copy']
+          : buildVideoArgs(options, effectiveDuration)),
         ...buildAudioArgs(options, container),
       ];
       // faststart 把 moov 索引移到文件头，不加则播放器要下完整个文件才能开始播，
@@ -377,7 +439,7 @@ async function transcodeOne(
 
       const result = await runFfmpeg(args, {
         taskId: options.taskId,
-        duration: options.trim ? options.trim.end - options.trim.start : meta.duration,
+        duration: effectiveDuration,
         onProgress: (p) => pushProgress(p.percent, p.outTime, p.speed),
       });
       canceled = result.canceled;
@@ -434,6 +496,23 @@ export function registerVideoIpc(win: BrowserWindow): void {
 
   handle(VIDEO_CHANNELS.thumbnail, (_event, filePath: string) =>
     grabFrame(filePath, THUMB_AT_SECONDS, THUMB_WIDTH),
+  );
+
+  /*
+   * 胶片条抽帧：**一次调用一帧，由渲染进程并发多次**。
+   *
+   * 试过的两个「一趟出整条」的写法都被实测否掉了（120s 720p，12 帧）：
+   * - `-skip_frame nokey` + `tile=12x1`：136ms，最快，但**内容是错的**——它拿的是
+   *   前 12 个关键帧，本片关键帧每 5s 一个，于是整条胶片只覆盖了前 55s（末格与
+   *   源 55s 的差 2.38、与源 115s 的差 9.9）。时间轴上的缩略图与刻度对不上，
+   *   比没有缩略图更误导。
+   * - `fps=12/120` + `tile=12x1`：405ms，覆盖正确（末格对应源 115s），但要**解完
+   *   整条视频**，成本随时长与码率线性涨；十分钟 1080p 上不可接受。
+   * 逐帧 seek 是 O(1) 于时长的：串行 12 次 1523ms、并发 4 只要 550ms，而且能
+   *   一帧一帧先显示出来。故保留逐帧，并发交给渲染进程的 createTaskQueue。
+   */
+  handle(VIDEO_CHANNELS.frame, (_event, filePath: string, atSeconds: number, width: number) =>
+    grabFrame(filePath, atSeconds, width),
   );
 
   handle(

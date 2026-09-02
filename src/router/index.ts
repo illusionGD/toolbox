@@ -20,7 +20,7 @@ import FontSplitView from '@/views/font/FontSplitView.vue';
 import FontConvertView from '@/views/font/FontConvertView.vue';
 import BitmapFontView from '@/views/font/BitmapFontView.vue';
 import SpinePreviewView from '@/views/media/SpinePreviewView.vue';
-import VideoCompressView from '@/views/media/VideoCompressView.vue';
+import VideoView from '@/views/media/VideoView.vue';
 import AudioView from '@/views/media/AudioView.vue';
 
 /**
@@ -41,7 +41,7 @@ const TOOL_COMPONENTS: Record<string, Component> = {
   'font-convert': FontConvertView,
   'font-bitmap': BitmapFontView,
   'media-spine': SpinePreviewView,
-  'media-video': VideoCompressView,
+  'media-video': VideoView,
   'media-audio': AudioView,
 };
 

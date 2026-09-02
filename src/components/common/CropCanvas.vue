@@ -6,7 +6,9 @@
       :style="{ width: `${stage.width}px`, height: `${stage.height}px` }"
       @pointerdown="handleStagePointerDown"
     >
-      <img :src="src" class="crop-canvas__img" alt="裁剪预览" draggable="false" />
+      <slot name="media">
+        <img :src="src" class="crop-canvas__img" alt="裁剪预览" draggable="false" />
+      </slot>
 
       <div
         v-if="rect"
@@ -24,7 +26,7 @@
         />
       </div>
 
-      <p v-else class="crop-canvas__hint">在图片上拖拽以框选裁剪区域</p>
+      <p v-else class="crop-canvas__hint">{{ hint }}</p>
     </div>
 
     <p v-if="rect" class="crop-canvas__readout">
@@ -38,17 +40,21 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { CropRect } from '@shared/types';
+import { snapCropEven } from '@shared/video';
 
 /**
  * 交互式裁剪画布。
  *
  * 坐标约定：对外与内部**一律使用图片原始像素**，只在渲染时乘 `scale` 换成显示像素。
  * 反过来（存显示像素、用时换算回去）会在窗口缩放时累积舍入漂移，框会越拖越偏。
+ *
+ * 被裁的东西由 `media` 插槽决定：默认是 `<img :src>`（图片裁剪 / 风格化页），
+ * 视频剪切页往里塞 `<video>`，于是能**边播边在动画面上拖框**、不必抽静帧。
  */
 
 interface Props {
-  /** 图片 data URL。 */
-  src: string;
+  /** 图片 data URL。用 `media` 插槽自带内容时可留空。 */
+  src?: string;
   /** 图片原始宽度 px。 */
   naturalWidth: number;
   /** 图片原始高度 px。 */
@@ -57,9 +63,27 @@ interface Props {
   modelValue: CropRect | null;
   /** 宽高比约束（宽 / 高）；自由裁剪为 null。 */
   aspect?: number | null;
+  /** 裁剪框最小边长（原始像素）。 */
+  minSize?: number;
+  /**
+   * 是否把提交出去的矩形偶数对齐。
+   *
+   * 视频要开：yuv420p 要求偶数宽高，ffmpeg 会**静默**把奇数值下调，不对齐就会
+   * 出现「面板写 641、产物是 640」（见 shared/video.ts）。图片走 sharp extract，
+   * 任意整数都精确，不必对齐。
+   */
+  snapEven?: boolean;
+  /** 未框选时的提示文案。 */
+  hint?: string;
 }
 
-const props = withDefaults(defineProps<Props>(), { aspect: null });
+const props = withDefaults(defineProps<Props>(), {
+  src: '',
+  aspect: null,
+  minSize: 4,
+  snapEven: false,
+  hint: '在图片上拖拽以框选裁剪区域',
+});
 
 const emit = defineEmits<{
   'update:modelValue': [value: CropRect | null];
@@ -68,9 +92,6 @@ const emit = defineEmits<{
 /** 八个缩放手柄的方位。 */
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
 type Handle = (typeof HANDLES)[number];
-
-/** 裁剪框最小边长（原始像素）。 */
-const MIN_SIZE = 4;
 
 const containerRef = ref<HTMLElement | null>(null);
 /** 容器可用尺寸，由 ResizeObserver 维护。 */
@@ -110,8 +131,8 @@ const selStyle = computed(() => {
  * @returns 合法矩形。
  */
 function clamp(r: CropRect): CropRect {
-  const width = Math.min(Math.max(r.width, MIN_SIZE), props.naturalWidth);
-  const height = Math.min(Math.max(r.height, MIN_SIZE), props.naturalHeight);
+  const width = Math.min(Math.max(r.width, props.minSize), props.naturalWidth);
+  const height = Math.min(Math.max(r.height, props.minSize), props.naturalHeight);
   return {
     width,
     height,
@@ -216,19 +237,31 @@ function resizeRect(origin: CropRect, handle: Handle, dx: number, dy: number): C
   return clamp(r);
 }
 
+/**
+ * 提交矩形给父组件。
+ *
+ * 取整在这里做而不是拖拽途中：主进程 extract / ffmpeg crop 只接受整数，早点取整
+ * 免得列表与实际结果对不上。`snapEven` 时再向下对齐到偶数——**对齐放在提交这一步**，
+ * 于是 v-model 里存的、面板上显示的、下发给 ffmpeg 的是同一个值，不会互相打脸。
+ * 代价是开了比例约束时对齐可能让比例差出 1–2 px，这比读数不实要好。
+ * @param r 待提交的矩形。
+ */
+function commit(r: CropRect): void {
+  const rounded: CropRect = {
+    left: Math.round(r.left),
+    top: Math.round(r.top),
+    width: Math.round(r.width),
+    height: Math.round(r.height),
+  };
+  emit('update:modelValue', props.snapEven ? snapCropEven(rounded) : rounded);
+}
+
 /** 结束拖拽：把本地矩形提交给父组件。 */
 function endDrag(): void {
   if (!drag) return;
   drag = null;
   if (!local.value) return;
-  const r = local.value;
-  // 提交整数坐标：主进程 extract 只接受整数，早点取整免得列表与实际结果对不上
-  emit('update:modelValue', {
-    left: Math.round(r.left),
-    top: Math.round(r.top),
-    width: Math.round(r.width),
-    height: Math.round(r.height),
-  });
+  commit(local.value);
   local.value = null;
 }
 
@@ -327,13 +360,7 @@ watch(
   (aspect) => {
     if (!aspect || !props.modelValue) return;
     const r = props.modelValue;
-    const fixed = clamp(applyAspect(r, aspect, 'se', r));
-    emit('update:modelValue', {
-      left: Math.round(fixed.left),
-      top: Math.round(fixed.top),
-      width: Math.round(fixed.width),
-      height: Math.round(fixed.height),
-    });
+    commit(clamp(applyAspect(r, aspect, 'se', r)));
   },
 );
 

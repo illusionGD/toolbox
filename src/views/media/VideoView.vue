@@ -1,42 +1,54 @@
 <template>
-  <ToolPageLayout
-    title="视频压缩 / 转码"
-    desc="批量压缩与格式转换，支持 MP4 / WebM / MKV / GIF"
-    category="媒体工具"
-  >
-    <!-- 操作栏 -->
+  <ToolPageLayout title="视频工具" desc="批量压缩转码，或剪切时间段与裁剪画面" category="媒体工具">
     <template #toolbar>
-      <n-space align="center">
-        <n-button type="primary" :disabled="processing" @click="handleAddFiles">
-          <template #icon><n-icon :component="CloudUploadOutline" /></template>
-          添加文件
-        </n-button>
-        <n-button :loading="scanning" :disabled="processing" @click="handleAddFolder">
-          <template #icon><n-icon :component="FolderOpenOutline" /></template>
-          添加文件夹
-        </n-button>
-        <n-checkbox v-model:checked="config.recursive" class="video__recursive">
-          含子文件夹
-        </n-checkbox>
-        <n-button
-          quaternary
-          :disabled="!checkedKeys.length || processing"
-          @click="handleRemoveChecked"
-        >
-          <template #icon><n-icon :component="TrashOutline" /></template>
-          移除选中{{ checkedKeys.length ? `(${checkedKeys.length})` : '' }}
-        </n-button>
-        <n-button quaternary :disabled="!items.length || processing" @click="handleClear">
-          <template #icon><n-icon :component="TrashOutline" /></template>
-          清空列表
-        </n-button>
-        <span v-if="capabilities" class="video__version">ffmpeg {{ capabilities.version }}</span>
-      </n-space>
+      <n-tabs v-model:value="tab" type="segment" size="small" class="video__tabs">
+        <n-tab name="compress">批量压缩 / 转码</n-tab>
+        <n-tab name="clip">剪切 / 裁剪</n-tab>
+      </n-tabs>
     </template>
 
-    <!-- 文件列表 -->
+    <!-- 主区：压缩=文件列表，剪切=单文件工作台 -->
     <template #main>
-      <div class="video__list" :class="{ 'video__list--drag': isDragOver }" v-bind="dropHandlers">
+      <div
+        v-if="tab === 'compress'"
+        class="video__list"
+        :class="{ 'video__list--drag': isDragOver }"
+        v-bind="dropHandlers"
+      >
+        <div class="video__bar">
+          <n-button size="small" type="primary" :disabled="processing" @click="handleAddFiles">
+            <template #icon><n-icon :component="CloudUploadOutline" /></template>
+            添加文件
+          </n-button>
+          <n-button
+            size="small"
+            :loading="scanning"
+            :disabled="processing"
+            @click="handleAddFolder"
+          >
+            <template #icon><n-icon :component="FolderOpenOutline" /></template>
+            添加文件夹
+          </n-button>
+          <n-checkbox v-model:checked="config.recursive" class="video__dim">含子文件夹</n-checkbox>
+          <n-button
+            size="small"
+            quaternary
+            :disabled="!checkedKeys.length || processing"
+            @click="handleRemoveChecked"
+          >
+            移除选中{{ checkedKeys.length ? `(${checkedKeys.length})` : '' }}
+          </n-button>
+          <n-button
+            size="small"
+            quaternary
+            :disabled="!items.length || processing"
+            @click="handleClear"
+          >
+            清空
+          </n-button>
+          <span v-if="capabilities" class="video__dim">ffmpeg {{ capabilities.version }}</span>
+        </div>
+
         <n-data-table
           v-if="items.length"
           v-model:checked-row-keys="checkedKeys"
@@ -54,10 +66,152 @@
           <p>拖拽视频到此处，或点击「添加文件」</p>
         </div>
       </div>
+
+      <div
+        v-else
+        class="video__clip"
+        :class="{ 'video__list--drag': isDragOver }"
+        v-bind="dropHandlers"
+      >
+        <div class="video__bar">
+          <n-button size="small" type="primary" :disabled="exporting" @click="handlePickClipFile">
+            <template #icon><n-icon :component="CloudUploadOutline" /></template>
+            选择视频
+          </n-button>
+          <span v-if="clipFile" class="video__clip-name" :title="clipFile.path">
+            {{ clipFile.name }}
+          </span>
+          <span v-if="clipMeta" class="video__dim">
+            {{ formatDuration(clipMeta.duration) }} ·
+            {{ clipMeta.video ? `${clipMeta.video.width}×${clipMeta.video.height}` : '无视频流' }}
+            <template v-if="clipMeta.video"> · {{ clipMeta.video.codec }}</template>
+            · {{ clipMeta.audio ? clipMeta.audio.codec : '无音轨' }}
+          </span>
+        </div>
+
+        <div v-if="!clipMeta?.video" class="video__empty">
+          <n-icon :size="40" :depth="3" :component="CloudUploadOutline" />
+          <p>{{ clipEmptyHint }}</p>
+        </div>
+
+        <template v-else>
+          <!-- 直接在播放画面上拖裁剪框：遮罩之外就是会被裁掉的部分，不必抽静帧 -->
+          <div class="video__stage">
+            <CropCanvas
+              v-model="crop"
+              :natural-width="clipMeta.video.width"
+              :natural-height="clipMeta.video.height"
+              :aspect="cropAspect"
+              :min-size="MIN_CROP_SIZE"
+              snap-even
+              hint="在画面上拖拽以框选裁剪区域（宽高会向下对齐到偶数）"
+            >
+              <template #media>
+                <video
+                  ref="videoRef"
+                  class="video__video"
+                  preload="metadata"
+                  :src="clipSrc"
+                  @timeupdate="handleTimeUpdate"
+                  @play="playing = true"
+                  @pause="playing = false"
+                />
+              </template>
+            </CropCanvas>
+          </div>
+
+          <WaveformSelect
+            v-model="selection"
+            :src="waveformUrl"
+            :frames="frames"
+            :duration="clipMeta.duration"
+            :playhead="playhead"
+            @seek="handleSeek"
+          />
+
+          <div class="video__seg">
+            <div class="video__seg-row">
+              <n-button size="small" @click="handleTogglePlay">
+                <template #icon>
+                  <n-icon :component="playing ? PauseOutline : PlayOutline" />
+                </template>
+                {{ playing ? '暂停' : '播放' }}
+              </n-button>
+              <n-button size="small" :disabled="!selection" @click="handlePlaySelection">
+                试听选区
+              </n-button>
+              <span class="video__dim">
+                {{ playhead.toFixed(2) }} / {{ clipMeta.duration.toFixed(2) }} s
+              </span>
+              <span v-if="!clipMeta.audio" class="video__dim">该视频无音轨，时间轴不显示波形</span>
+            </div>
+
+            <div class="video__seg-row">
+              <span class="video__dim">起</span>
+              <n-input-number
+                :value="selection?.start ?? 0"
+                size="small"
+                class="video__num"
+                :min="0"
+                :max="clipMeta.duration"
+                :step="0.1"
+                :precision="3"
+                @update:value="(v: number | null) => updateSelection('start', v)"
+              />
+              <span class="video__dim">止</span>
+              <n-input-number
+                :value="selection?.end ?? 0"
+                size="small"
+                class="video__num"
+                :min="0"
+                :max="clipMeta.duration"
+                :step="0.1"
+                :precision="3"
+                @update:value="(v: number | null) => updateSelection('end', v)"
+              />
+              <span class="video__dim">
+                时长 {{ selection ? (selection.end - selection.start).toFixed(3) : '0.000' }} s
+              </span>
+              <n-button size="tiny" quaternary :disabled="!selection" @click="selection = null">
+                清除选区
+              </n-button>
+            </div>
+
+            <p class="video__tip">{{ clipPrecisionTip }}</p>
+          </div>
+        </template>
+      </div>
     </template>
 
-    <!-- 参数面板 -->
+    <!-- 参数面板：输出设置两个 tab 共用一份（同一个概念不该配两遍） -->
     <template #panel>
+      <template v-if="tab === 'clip'">
+        <h3 class="video__panel-title">剪切与裁剪</h3>
+
+        <div class="video__field">
+          <label class="video__label">裁剪比例</label>
+          <n-select v-model:value="config.clipAspect" :options="aspectOptions" size="small" />
+          <div class="video__seg-row video__mt">
+            <span class="video__dim">
+              裁剪区域
+              {{ crop ? `${crop.width}×${crop.height} @ (${crop.left}, ${crop.top})` : '整幅画面' }}
+            </span>
+            <n-button size="tiny" quaternary :disabled="!crop" @click="crop = null">
+              清除裁剪
+            </n-button>
+          </div>
+          <p class="video__tip">输出画面 {{ outputSizeText }}</p>
+        </div>
+
+        <div class="video__field">
+          <label class="video__label">输出名后缀</label>
+          <n-input v-model:value="config.clipSuffix" size="small" placeholder="-clip" />
+          <p class="video__tip">
+            接在原文件名之后。留空且输出目录就是源目录、扩展名又相同时会盖掉源文件，那种组合会被拦下
+          </p>
+        </div>
+      </template>
+
       <h3 class="video__panel-title">输出设置</h3>
 
       <div class="video__field">
@@ -120,7 +274,10 @@
           <div v-else class="video__field">
             <label class="video__label">目标大小 MB</label>
             <n-input-number v-model:value="config.targetSizeMb" size="small" :min="1" :step="1" />
-            <p class="video__tip">单趟按时长反算码率，实际误差约 ±10%</p>
+            <p class="video__tip">
+              单趟按时长（剪切后的）反算码率，不是精确控制：实测好压的画面会明显偏小、 高噪画面超出
+              20%–45%
+            </p>
           </div>
         </template>
 
@@ -153,35 +310,52 @@
         <label class="video__label">输出目录</label>
         <div class="video__dir">
           <n-input v-model:value="config.outputDir" size="small" placeholder="选择或粘贴输出目录" />
-          <n-button size="small" :disabled="config.overwrite" @click="handlePickOutputDir">
+          <n-button size="small" :disabled="overwriteActive" @click="handlePickOutputDir">
             <n-icon :component="FolderOpenOutline" />
           </n-button>
         </div>
       </div>
 
-      <div class="video__field video__field--row">
+      <!-- 覆盖只在压缩 tab 给：剪一段还把源片删掉是不可逆的误操作 -->
+      <div v-if="tab === 'compress'" class="video__field video__field--row">
         <label class="video__label">覆盖原文件</label>
         <n-switch v-model:value="config.overwrite" size="small" />
       </div>
 
-      <n-button
-        v-if="!processing"
-        type="primary"
-        block
-        class="video__mt"
-        :disabled="!canStart"
-        @click="handleStart"
-      >
-        {{ startLabel }}
-      </n-button>
-      <n-button v-else block secondary type="error" class="video__mt" @click="handleCancel">
-        取消处理
-      </n-button>
+      <template v-if="tab === 'compress'">
+        <n-button
+          v-if="!processing"
+          type="primary"
+          block
+          class="video__mt"
+          :disabled="!canStart"
+          @click="handleStart"
+        >
+          {{ startLabel }}
+        </n-button>
+        <n-button v-else block secondary type="error" class="video__mt" @click="handleCancel">
+          取消处理
+        </n-button>
+      </template>
+      <template v-else>
+        <n-button
+          v-if="!exporting"
+          type="primary"
+          block
+          class="video__mt"
+          :disabled="!canExport"
+          @click="handleExportClip"
+        >
+          {{ exportLabel }}
+        </n-button>
+        <n-button v-else block secondary type="error" class="video__mt" @click="handleCancelExport">
+          取消导出（{{ exportPercent }}%）
+        </n-button>
+      </template>
     </template>
 
-    <!-- 底部统计 -->
     <template #footer>
-      <div class="video__footer">
+      <div v-if="tab === 'compress'" class="video__footer">
         <span>已选择 {{ items.length }} 个文件</span>
         <div class="video__footer-stats">
           <span>总时长 {{ formatDuration(totalDuration) }}</span>
@@ -190,6 +364,27 @@
           <span v-if="totalRatio !== null" class="video__footer-ratio">
             {{ totalRatio < 0 ? `体积增大 ${-totalRatio}%` : `体积减小 ${totalRatio}%` }}
           </span>
+        </div>
+      </div>
+      <div v-else class="video__footer">
+        <span v-if="clipMeta">源时长 {{ formatDuration(clipMeta.duration) }}</span>
+        <span v-else>未选择文件</span>
+        <div class="video__footer-stats">
+          <span v-if="selection">
+            将导出 {{ (selection.end - selection.start).toFixed(2) }} s
+          </span>
+          <span v-else-if="clipMeta?.video">将导出整段</span>
+          <span v-if="clipOutputPath" class="video__footer-ratio">
+            已导出 {{ clipOutputSize }}
+          </span>
+          <n-button
+            v-if="clipOutputPath"
+            size="tiny"
+            quaternary
+            @click="void showInFolderApi(clipOutputPath)"
+          >
+            打开所在文件夹
+          </n-button>
         </div>
       </div>
     </template>
@@ -220,33 +415,50 @@ import {
   NSlider,
   NSpace,
   NSwitch,
+  NTab,
+  NTabs,
   NTooltip,
   useMessage,
   type DataTableColumns,
 } from 'naive-ui';
-import { CloudUploadOutline, EyeOutline, FolderOpenOutline, TrashOutline } from '@vicons/ionicons5';
+import {
+  CloudUploadOutline,
+  EyeOutline,
+  FolderOpenOutline,
+  PauseOutline,
+  PlayOutline,
+  TrashOutline,
+} from '@vicons/ionicons5';
 import type {
+  CropRect,
   PickedFile,
+  SilenceRange,
   TranscodeOptions,
   VideoAudioMode,
   VideoCapabilities,
   VideoCodec,
+  VideoMeta,
   VideoOutputFormat,
   VideoQualityMode,
 } from '@shared/types';
+import { MIN_CROP_SIZE } from '@shared/video';
 import type { VideoItem } from './types';
 import ToolPageLayout from '@/components/layout/ToolPageLayout.vue';
+import CropCanvas from '@/components/common/CropCanvas.vue';
 import StatusTag from '@/components/common/StatusTag.vue';
 import TaskProgress from '@/components/common/TaskProgress.vue';
 import VideoPreviewModal from '@/components/common/VideoPreviewModal.vue';
+import WaveformSelect from '@/components/common/WaveformSelect.vue';
 import { useFileDrop } from '@/composables/useFileDrop';
 import { useFolderImport } from '@/composables/useFolderImport';
 import { useToolConfig } from '@/composables/useToolConfig';
+import { getWaveformApi } from '@/services/audio';
 import { showInFolderApi } from '@/services/file';
 import { pickDirectoryApi, pickFilesApi } from '@/services/fs';
 import {
   cancelTranscodeApi,
   getVideoCapabilitiesApi,
+  getVideoFrameApi,
   getVideoThumbnailApi,
   onTranscodeProgress,
   probeVideoApi,
@@ -255,6 +467,7 @@ import {
 } from '@/services/video';
 import { formatBytes } from '@/utils/format';
 import { createTaskQueue } from '@/utils/taskQueue';
+import { filmstripTimes } from '@/utils/timeline';
 
 // #region state
 const message = useMessage();
@@ -285,6 +498,30 @@ const TABLE_SCROLL_X = 1180;
  */
 const PROBE_CONCURRENCY = 2;
 
+/** 胶片条格子数。12 格已能认出场景切换，再多每格就窄到看不清了。 */
+const FILMSTRIP_COUNT = 12;
+
+/** 胶片条单帧宽度 px（高度由 ffmpeg 按比例算）。 */
+const FILMSTRIP_WIDTH = 160;
+
+/**
+ * 胶片条抽帧并发数。
+ *
+ * 实测 120 s 720p 取 12 帧：串行 1523 ms，并发 4 只要 550 ms（3× 加速），
+ * 而且逐帧 seek 的成本与视频时长无关。这与转码「一个进程就吃满所有核心」不同——
+ * 单帧 seek 的时间大头是进程创建与解码启动，并行确实有效。
+ */
+const FRAME_CONCURRENCY = 4;
+
+/** 波形图尺寸：与胶片条上下叠，比音频页矮一半就够。 */
+const WAVEFORM_SIZE = { width: 1600, height: 48 };
+
+/** 波形颜色用中性灰：波形是内容，主色留给用户正在拖的选区。 */
+const WAVEFORM_COLOR = '#9b9ba4';
+
+const tab = ref<'compress' | 'clip'>('compress');
+
+// 压缩 tab
 const items = ref<VideoItem[]>([]);
 const checkedKeys = ref<string[]>([]);
 const processing = ref(false);
@@ -297,7 +534,26 @@ const currentTaskId = ref('');
 /** 用户已点过取消：批量中途取消要停下整个队列，而不只是当前这一个。 */
 let canceledByUser = false;
 
-/** 持久化的处理配置（记住上次使用）。 */
+// 剪切 tab
+const clipFile = ref<PickedFile | null>(null);
+const clipMeta = ref<VideoMeta | null>(null);
+const waveformUrl = ref('');
+/** 胶片条各格的 data URL；先摆好空格子再逐个填，条宽不会跳。 */
+const frames = ref<string[]>([]);
+const selection = ref<SilenceRange | null>(null);
+const crop = ref<CropRect | null>(null);
+const videoRef = ref<HTMLVideoElement | null>(null);
+const playhead = ref(0);
+const playing = ref(false);
+/** 「试听选区」启动的播放：到选区末尾自动停，普通播放不受限。 */
+const limitToSelection = ref(false);
+const exporting = ref(false);
+const exportPercent = ref(0);
+const exportTaskId = ref('');
+const clipOutputPath = ref('');
+const clipOutputSize = ref('');
+
+/** 持久化的处理配置（两个 tab 共用，输出设置是同一个概念）。 */
 const { config } = useToolConfig('media-video', {
   format: 'mp4' as VideoOutputFormat,
   codec: 'libx264' as VideoCodec,
@@ -314,6 +570,10 @@ const { config } = useToolConfig('media-video', {
   outputDir: '',
   overwrite: false,
   recursive: false,
+  // 剪切默认带后缀：把 a.mp4 剪一段还存回原目录是最自然的操作，没有后缀就会撞上源文件
+  clipSuffix: '-clip',
+  /** 裁剪比例（宽/高）；0 表示自由裁剪。 */
+  clipAspect: 0,
 });
 
 /** 从文件夹添加（与图片四页共用同一实现）。 */
@@ -354,6 +614,14 @@ const audioOptions = [
   { label: '移除音轨', value: 'remove' },
 ];
 
+const aspectOptions = [
+  { label: '自由', value: 0 },
+  { label: '16 : 9', value: 16 / 9 },
+  { label: '9 : 16', value: 9 / 16 },
+  { label: '4 : 3', value: 4 / 3 },
+  { label: '1 : 1', value: 1 },
+];
+
 // 预览
 const previewShow = ref(false);
 const previewTitle = ref('');
@@ -367,7 +635,10 @@ const previewResultLabel = ref('处理后');
 // #region drop
 const { isDragOver, handlers: dropHandlers } = useFileDrop({
   accept: ACCEPT,
-  onDrop: (files) => addFiles(files),
+  onDrop: (files) => {
+    if (tab.value === 'compress') addFiles(files);
+    else if (files[0]) void loadClipFile(files[0]);
+  },
 });
 // #endregion
 
@@ -411,6 +682,67 @@ const canStart = computed(
 const startLabel = computed(() =>
   checkedKeys.value.length ? `开始处理 (${checkedKeys.value.length})` : '开始处理',
 );
+
+/** 覆盖模式只在压缩 tab 生效，剪切 tab 的输出目录按钮不该被它禁用。 */
+const overwriteActive = computed(() => tab.value === 'compress' && config.overwrite);
+
+/** 播放源：走 tb-media 协议，路径已在 probe 时登记白名单。 */
+const clipSrc = computed(() => (clipFile.value ? toMediaUrl(clipFile.value.path) : ''));
+
+/** 裁剪比例：0 表示自由裁剪，CropCanvas 要的是 null。 */
+const cropAspect = computed(() => (config.clipAspect > 0 ? config.clipAspect : null));
+
+/** 空态提示：区分「还没选」「读取中」「没有视频流」三种。 */
+const clipEmptyHint = computed(() => {
+  if (!clipFile.value) return '拖拽一个视频到此处，或点击「选择视频」';
+  if (!clipMeta.value) return '正在读取视频信息…';
+  return '该文件没有视频流，请用音频工具处理';
+});
+
+/**
+ * 输出画面尺寸说明。
+ *
+ * 只报**能算准的部分**：裁剪后的尺寸是确定的（已偶数对齐），而缩放宽度由
+ * ffmpeg 的 `-2` 取整决定，这里不替它算一个可能差 1–2 px 的数字。
+ */
+const outputSizeText = computed(() => {
+  const video = clipMeta.value?.video;
+  if (!video) return '—';
+  const width = crop.value?.width ?? video.width;
+  const height = crop.value?.height ?? video.height;
+  const base = `${width}×${height}`;
+  if (config.format === 'gif') return `${base}，再缩到宽 ${config.gifWidth}`;
+  if (config.maxHeight > 0 && height > config.maxHeight) {
+    return `${base}，再缩到高 ${config.maxHeight}`;
+  }
+  return base;
+});
+
+/** 剪切精度提示：copy 与重编码是两种完全不同的行为，按实测数字写。 */
+// 文案里的数字都是实测的（12s 640×360、关键帧每 5s、请求 6.5→9.5 s）：
+// 两种模式下**视频流都精确到 3.000 s / 90 帧**，容器时长却报 3.020 s——多出来的
+// 20ms 是 aac 音频帧（1024 样本 @44.1kHz ≈ 23ms）切不开而向上对齐的结果，与
+// copy / 重新编码无关，移除音轨后两者都是精确的 3.000 s。所以这里不把「多一点」
+// 说成是 copy 的锅，copy 真正的代价只有「起点必须落在关键帧上」这一条。
+const clipPrecisionTip = computed(() => {
+  if (config.format === 'gif') return 'GIF 无音轨；剪切精确到毫秒，画面裁剪在转 GIF 前完成';
+  if (config.codec === 'copy') {
+    return '「不重新编码」只能按关键帧整包切，且无法裁剪画面：输出 MP4 时起点仍与源同一帧（实测逐像素一致），其他容器会让起点退到上一个关键帧，已被拦下';
+  }
+  return '重新编码时剪切精确到帧（实测请求 3.000 s 得 90 帧 / 3.000 s 视频流，首帧与源同一帧）；带音轨时容器时长会向上对齐到音频帧，约多 0.02 s';
+});
+
+const canExport = computed(() => {
+  if (!clipMeta.value?.video || exporting.value || !config.outputDir) return false;
+  // 既不剪也不裁就只是整片重编码，那是压缩 tab 的事
+  return selection.value !== null || crop.value !== null;
+});
+
+const exportLabel = computed(() => {
+  if (selection.value && crop.value) return '导出选区（含裁剪）';
+  if (crop.value) return '导出裁剪';
+  return '导出选区';
+});
 
 /** 表格分页（受控，因为要知道当前页是哪些行才能只为它们探测元信息）。 */
 const pagination = reactive({
@@ -480,6 +812,16 @@ watch(
   },
   { immediate: true },
 );
+
+/**
+ * 离开剪切 tab 时停下播放。
+ *
+ * watch 默认 pre-flush，此时 `v-if` 还没把 `<video>` 摘掉，videoRef 仍有效；
+ * 放到 post 就只剩一个已卸载的元素，解码器与文件句柄都收不回来。
+ */
+watch(tab, (value) => {
+  if (value !== 'clip') stopVideo();
+});
 // #endregion
 
 // #region helpers
@@ -635,6 +977,10 @@ onMounted(() => {
     });
 
   stopProgress = onTranscodeProgress((progress) => {
+    if (progress.taskId === exportTaskId.value) {
+      exportPercent.value = Math.max(0, Math.round(progress.percent));
+      return;
+    }
     // 按 taskId 过滤：上一个任务取消后仍可能有一条滞后推送到达，不过滤
     // 就会写到新任务的行上（同 file-stats 的 scanId 过滤）
     if (progress.taskId !== currentTaskId.value) return;
@@ -648,12 +994,15 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopProgress?.();
+  stopVideo();
+  frameQueue.clear();
   // 页面被切走时正在跑的 ffmpeg 必须杀掉，否则它在后台继续吃满 CPU
   if (currentTaskId.value) void cancelTranscodeApi(currentTaskId.value);
+  if (exportTaskId.value) void cancelTranscodeApi(exportTaskId.value);
 });
 // #endregion
 
-// #region actions
+// #region actions（压缩 tab）
 /** 追加文件（按路径去重）。元信息不在这里探测，交给当前页的 watch 按需取。 */
 function addFiles(files: PickedFile[]): void {
   const existing = new Set(items.value.map((i) => i.path));
@@ -733,7 +1082,7 @@ async function openPreview(row: VideoItem): Promise<void> {
 }
 
 /**
- * 组装传给主进程的转码选项。
+ * 组装传给主进程的转码选项（两个 tab 共用）。
  * @param taskId 本次任务 id。
  * @returns 转码选项。
  */
@@ -829,13 +1178,230 @@ async function handleCancel(): Promise<void> {
   if (currentTaskId.value) await cancelTranscodeApi(currentTaskId.value);
 }
 // #endregion
+
+// #region actions（剪切 tab）
+/** 胶片条抽帧队列。 */
+const frameQueue = createTaskQueue(FRAME_CONCURRENCY);
+
+/** 换文件就 +1，用来丢弃上一个文件迟到的帧。 */
+let frameToken = 0;
+
+/**
+ * 停止播放并交还文件句柄。
+ *
+ * **必须清 src 再 load()**：只 pause() 的话解码器仍占着这个文件，
+ * 「覆盖原文件」写入会失败（VideoPreviewModal 的 stopPlayback 已记过这一条）。
+ */
+function stopVideo(): void {
+  playing.value = false;
+  limitToSelection.value = false;
+  const el = videoRef.value;
+  if (!el) return;
+  el.pause();
+  el.removeAttribute('src');
+  el.load();
+}
+
+/**
+ * 排队抽取胶片条各帧。
+ * @param path 视频路径。
+ * @param duration 总时长秒。
+ */
+function loadFilmstrip(path: string, duration: number): void {
+  const times = filmstripTimes(duration, FILMSTRIP_COUNT);
+  if (!times.length) return;
+  // 先摆好空格子：抽帧是逐个回来的，先占位条宽就不会跳
+  frames.value = times.map(() => '');
+  const token = frameToken;
+  times.forEach((at, index) => {
+    frameQueue.push(async () => {
+      if (token !== frameToken) return;
+      const url = await getVideoFrameApi(path, at, FILMSTRIP_WIDTH).catch(() => '');
+      // 回来时用户可能已换文件，token 不符就丢弃，否则新片的胶片条里会混进旧帧
+      if (token !== frameToken || !url) return;
+      frames.value[index] = url;
+    });
+  });
+}
+
+/**
+ * 载入待剪切的视频：探元信息 + 抽胶片条 + 画波形。
+ * @param file 目标文件。
+ */
+async function loadClipFile(file: PickedFile): Promise<void> {
+  stopVideo();
+  frameToken += 1;
+  frameQueue.clear();
+  clipFile.value = file;
+  clipMeta.value = null;
+  waveformUrl.value = '';
+  frames.value = [];
+  selection.value = null;
+  crop.value = null;
+  playhead.value = 0;
+  clipOutputPath.value = '';
+  clipOutputSize.value = '';
+
+  // probe 顺带把路径登记进 tb-media 白名单，播放才不会被协议以 403 拒掉
+  const meta = await probeVideoApi(file.path).catch(() => null);
+  if (!meta) {
+    message.error('读取视频信息失败');
+    return;
+  }
+  clipMeta.value = meta;
+  if (!meta.video) {
+    message.error('该文件没有视频流，请用音频工具处理');
+    return;
+  }
+
+  loadFilmstrip(file.path, meta.duration);
+  // 无音轨时不发这次请求：showwavespic 找不到音频流会直接退 1，
+  // 拿一次注定失败的调用去换一个空波形没有意义（时间轴那边也不会显示「生成中」）
+  if (meta.audio) {
+    waveformUrl.value = await getWaveformApi(file.path, {
+      ...WAVEFORM_SIZE,
+      color: WAVEFORM_COLOR,
+    }).catch(() => '');
+  }
+}
+
+/** 选择待剪切的视频。 */
+async function handlePickClipFile(): Promise<void> {
+  const files = await pickFilesApi({
+    multiple: false,
+    filters: [{ name: '视频', extensions: ACCEPT }],
+    title: '选择要剪切的视频',
+  });
+  if (files[0]) await loadClipFile(files[0]);
+}
+
+/**
+ * 从数字输入框改选区端点。
+ * @param edge 改的是哪一端。
+ * @param value 新值秒。
+ */
+function updateSelection(edge: 'start' | 'end', value: number | null): void {
+  const duration = clipMeta.value?.duration ?? 0;
+  if (value === null || duration <= 0) return;
+  const current = selection.value ?? { start: 0, end: duration };
+  const next = { ...current, [edge]: Math.min(Math.max(0, value), duration) };
+  // 输入过头会让起止翻转，归一化而不是拒绝输入
+  selection.value = { start: Math.min(next.start, next.end), end: Math.max(next.start, next.end) };
+}
+
+/**
+ * 时间轴上点击：跳播到该时间点。
+ * @param seconds 目标时间秒。
+ */
+function handleSeek(seconds: number): void {
+  playhead.value = seconds;
+  limitToSelection.value = false;
+  const el = videoRef.value;
+  if (el) el.currentTime = seconds;
+}
+
+/** 播放头跟随；「试听选区」时到选区末尾自动停。 */
+function handleTimeUpdate(): void {
+  const el = videoRef.value;
+  if (!el) return;
+  playhead.value = el.currentTime;
+  const range = selection.value;
+  if (limitToSelection.value && range && el.currentTime >= range.end) {
+    el.pause();
+    limitToSelection.value = false;
+  }
+}
+
+/** 播放 / 暂停。原生 controls 用不了（画面上盖着裁剪框，指针事件都归它）。 */
+function handleTogglePlay(): void {
+  const el = videoRef.value;
+  if (!el) return;
+  if (el.paused) {
+    limitToSelection.value = false;
+    void el.play().catch(() => {
+      // 播放失败（协议未授权 / 浏览器不支持该编码）时静默：剪切与导出仍可用
+    });
+  } else {
+    el.pause();
+  }
+}
+
+/** 从选区开头播到选区末尾（接缝处画面与声音是否连贯只能靠看/听）。 */
+function handlePlaySelection(): void {
+  const el = videoRef.value;
+  const range = selection.value;
+  if (!el || !range) return;
+  el.currentTime = range.start;
+  limitToSelection.value = true;
+  void el.play().catch(() => {
+    limitToSelection.value = false;
+  });
+}
+
+/** 导出：把选区与裁剪框随 transcode 一起下发。 */
+async function handleExportClip(): Promise<void> {
+  const file = clipFile.value;
+  if (!file) return;
+  const range = selection.value;
+  const rect = crop.value;
+  const taskId = `clip-${Date.now()}`;
+  exporting.value = true;
+  exportPercent.value = 0;
+  exportTaskId.value = taskId;
+  clipOutputPath.value = '';
+  clipOutputSize.value = '';
+
+  try {
+    const result = await transcodeVideoApi(file.path, {
+      ...buildOptions(taskId),
+      // 剪一段还把源片删掉是不可逆的误操作，这个 tab 一律不覆盖
+      overwrite: false,
+      nameSuffix: config.clipSuffix.trim(),
+      // 必须重建纯对象：selection / crop 都在 ref 里，是**深层响应式 Proxy**，
+      // 直接经 IPC 传会报 "An object could not be cloned"（同 AudioView 的 trim、
+      // ImageCompressView 的 advanced、FileStatsView 的 ignoreDirs）
+      ...(range ? { trim: { start: range.start, end: range.end } } : {}),
+      ...(rect
+        ? { crop: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } }
+        : {}),
+    });
+    if (result.canceled) {
+      message.info('已取消导出');
+      return;
+    }
+    clipOutputPath.value = result.outputPath;
+    clipOutputSize.value = formatBytes(result.outputSize);
+    message.success(`已导出 ${formatBytes(result.outputSize)}`);
+  } catch (e) {
+    // transcodeVideoApi 是静默的（为批量准备），单文件导出这条路必须自己报错
+    message.error(e instanceof Error ? e.message : '导出失败');
+  } finally {
+    exporting.value = false;
+    exportTaskId.value = '';
+    exportPercent.value = 0;
+  }
+}
+
+/** 取消导出。 */
+async function handleCancelExport(): Promise<void> {
+  if (exportTaskId.value) await cancelTranscodeApi(exportTaskId.value);
+}
+// #endregion
 </script>
 
 <style scoped lang="scss">
 .video {
-  &__list {
+  &__tabs {
+    max-width: 320px;
+  }
+
+  &__list,
+  &__clip {
+    display: flex;
     flex: 1;
+    flex-direction: column;
     min-height: 0;
+    gap: var(--tb-space-3);
     border: 1px dashed transparent;
     border-radius: var(--tb-radius-md);
     transition: border-color 0.15s;
@@ -846,24 +1412,70 @@ async function handleCancel(): Promise<void> {
     }
   }
 
+  &__bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--tb-space-2);
+  }
+
   &__table {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
   }
 
-  // 「含子文件夹」只服务于旁边的「添加文件夹」，压暗一档避免与主操作抢注意力
-  &__recursive {
-    font-size: 13px;
-    color: var(--tb-text-secondary);
-  }
-
-  // 版本号只是排查问题时的线索，压到最暗一档
-  &__version {
+  // 辅助信息统一压暗一档，避免与主操作抢注意力
+  &__dim {
     font-size: 12px;
     color: var(--tb-text-secondary);
   }
 
+  &__clip-name {
+    max-width: 320px;
+    overflow: hidden;
+    font-size: 13px;
+    color: var(--tb-text-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  // 画面区吃掉剩余高度，时间轴与控制条固定在下方
+  &__stage {
+    flex: 1;
+    min-height: 120px;
+  }
+
+  &__video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    // 指针事件全归裁剪框：原生 controls 在这里既盖不住也点不着，已由自绘按钮替代
+    pointer-events: none;
+  }
+
+  &__seg {
+    display: flex;
+    flex-direction: column;
+    gap: var(--tb-space-2);
+    padding: var(--tb-space-3);
+    border: 1px solid var(--tb-border);
+    border-radius: var(--tb-radius-md);
+  }
+
+  &__seg-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--tb-space-2);
+  }
+
+  &__num {
+    width: 104px;
+  }
+
   &__empty {
     display: flex;
+    flex: 1;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -932,6 +1544,7 @@ async function handleCancel(): Promise<void> {
 
   &__footer-stats {
     display: flex;
+    align-items: center;
     gap: var(--tb-space-4);
   }
 

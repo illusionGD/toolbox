@@ -72,6 +72,8 @@ export const VIDEO_CHANNELS = {
   probe: 'video:probe',
   /** 抽一帧作缩略图。 */
   thumbnail: 'video:thumbnail',
+  /** 抽任意时间点的一帧（胶片条时间轴用）。 */
+  frame: 'video:frame',
   transcode: 'video:transcode',
   cancelTranscode: 'video:cancelTranscode',
   /** 主进程 → 渲染进程：转码进度推送。 */

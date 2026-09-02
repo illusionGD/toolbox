@@ -43,6 +43,26 @@ export function getVideoThumbnailApi(filePath: string): Promise<string> {
 }
 
 /**
+ * 抽任意时间点的一帧（胶片条时间轴用）。
+ *
+ * 一次一帧、由调用方并发多次（实测 120s 720p 取 12 帧：串行 1523ms、并发 4
+ * 只要 550ms，且成本与视频时长无关；一趟出整条的两种写法要么覆盖不到全片、
+ * 要么得解完整条视频，见主进程注释）。
+ * @param filePath 视频路径。
+ * @param atSeconds 时间点秒。
+ * @param width 输出宽度 px。
+ * @returns jpeg data URL。
+ */
+export function getVideoFrameApi(
+  filePath: string,
+  atSeconds: number,
+  width: number,
+): Promise<string> {
+  // 同缩略图：单帧失败由调用方占位兜底，十几个格子逐个弹窗是灾难
+  return unwrap(window.api.video.frame(filePath, atSeconds, width), { silent: true });
+}
+
+/**
  * 转码单个视频。
  * @param sourcePath 源文件路径。
  * @param options 转码选项。
