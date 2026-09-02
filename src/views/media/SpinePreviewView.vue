@@ -93,6 +93,18 @@
       </div>
       <p v-else class="spine__empty">导入素材后显示动画列表</p>
 
+      <!-- 骨骼层级统计（不跟随「显示包围盒」，加载后常显） -->
+      <div v-if="boneStats" class="spine__info">
+        <label class="spine__label">骨骼层级</label>
+        <div class="spine__info-grid">
+          <span>骨骼数量</span><span>{{ boneStats.count }}</span> <span>最大深度</span
+          ><span>{{ boneStats.maxDepth }} 层</span>
+        </div>
+        <div v-if="boneStats.deepestChain.length" class="spine__chain">
+          最深的一条：{{ boneStats.deepestChain.join(' › ') }}
+        </div>
+      </div>
+
       <!-- 包围盒 / 骨架数据 -->
       <div v-if="showBounds && boundsInfo" class="spine__info">
         <label class="spine__label">getLocalBounds()</label>
@@ -145,6 +157,7 @@ const {
   speed,
   showBounds,
   boundsInfo,
+  boneStats,
   load,
   play,
   togglePause,
@@ -333,6 +346,19 @@ onBeforeUnmount(() => dispose());
       color: var(--tb-text-primary);
       text-align: right;
     }
+  }
+
+  &__chain {
+    margin-bottom: var(--tb-space-3);
+    padding: var(--tb-space-2) var(--tb-space-3);
+    font-family: var(--tb-font-mono, monospace);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--tb-text-secondary);
+    background: var(--tb-bg-base);
+    border: 1px solid var(--tb-border);
+    border-radius: var(--tb-radius-sm);
+    word-break: break-all;
   }
 
   &__files {

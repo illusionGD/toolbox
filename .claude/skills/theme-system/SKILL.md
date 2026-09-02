@@ -17,7 +17,7 @@ description: Toolbox 主题系统——黑/紫深色 tokens、主题主色（预
 - `src/types/theme.d.ts` — `ThemeMode` / `ThemePreset` / `ThemeConfig` 类型。
 - `src/constants/theme.ts` — `DEFAULT_PRIMARY_COLOR`(#7c3aed)、`THEME_STORAGE_KEY`、`THEME_PRESETS`。
 - `src/utils/color.ts` — 纯函数：`hexToRgb`/`rgbToHex`/`lighten`/`darken`/`withAlpha`/`isValidHex`。
-- `src/stores/theme.ts` — `useThemeStore`：state `mode`/`primaryColor`，getter `isDark`，action `setPrimaryColor`/`setMode`/`resetPrimaryColor`；启动读 localStorage，`watch` 变化即写回。
+- `src/stores/theme.ts` — `useThemeStore`：state `mode`/`primaryColor`，getter `isDark`，action `setPrimaryColor`/`setMode`/`resetPrimaryColor`；启动同步读应用状态（命名空间 `theme`），`watch` 变化即写回。持久化落在数据保存目录，见 [[app-storage]]——同步读之所以还成立，是因为 `initAppState()` 在 `app.mount()` 之前已把快照读进内存，主题色不会闪一帧默认值。
 - `src/composables/useTheme.ts` — `useTheme()`：由主色派生 naive-ui `themeOverrides`（primaryColor + hover/pressed/suppl），并把主色相关值写入 `:root` 的 CSS 变量。**在 App.vue 调用一次**。
 - `src/assets/styles/tokens.scss` — 完整深色 tokens（背景层级、文本层级、边框、圆角、间距；主色变量运行时由 JS 注入，SCSS 里给兜底默认）。
 - `src/assets/styles/theme.scss` — 应用 tokens 到 body + 自定义滚动条。

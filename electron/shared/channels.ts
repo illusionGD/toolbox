@@ -149,3 +149,29 @@ export const EXCEL_CHANNELS = {
   /** 转换并落盘：一种语言一个 JSON。 */
   toJson: 'excel:toJson',
 } as const;
+
+/** 存储路径（数据缓存目录 / 数据保存目录）通道。 */
+export const STORAGE_CHANNELS = {
+  /** 读当前生效路径、默认路径与回退情况。 */
+  getPaths: 'storage:getPaths',
+  /** 统计某个目录的占用（字节数与文件数）。 */
+  dirUsage: 'storage:dirUsage',
+  /** 更改数据保存目录，并把现有数据迁移过去。 */
+  setDataDir: 'storage:setDataDir',
+  /** 更改数据缓存目录（缓存可丢弃，不迁移，清空旧目录）。 */
+  setCacheDir: 'storage:setCacheDir',
+  /** 恢复某个目录为默认值（同时清掉用户显式设置）。 */
+  resetDir: 'storage:resetDir',
+  /** 清空缓存目录内容（保留目录本身）。 */
+  clearCache: 'storage:clearCache',
+  /** 在系统文件管理器中打开某个目录。 */
+  openDir: 'storage:openDir',
+} as const;
+
+/** 应用状态（主题 / 各工具配置 / 使用统计）持久化通道，落在数据保存目录。 */
+export const APP_STATE_CHANNELS = {
+  /** 读取整个状态 blob（渲染进程启动时读一次）。 */
+  read: 'appState:read',
+  /** 按命名空间合并写入（防抖后调用）。 */
+  write: 'appState:write',
+} as const;

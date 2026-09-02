@@ -42,6 +42,12 @@ node_modules/@ffprobe-installer/**
 - pnpm 10+ **不自动装其它平台的可选二进制**，打包时 electron-builder 会 warn 一串 `platform-specific optional dependencies not bundled`（darwin/linux/win32-ia32 等）——**只要本平台（win32-x64）的包在磁盘上就没事**，warn 可忽略。
 - 若哪天报本平台 sharp/ffmpeg 缺失：确认 `@img/sharp-win32-x64`、`@ffmpeg-installer/win32-x64`、`@ffprobe-installer/win32-x64` 在 `node_modules` 下；必要时把它们加进 package.json 的 `optionalDependencies` 或用 `node-linker=hoisted`。
 - 首次打包 electron-builder 会联网下 electron zip、nsis、7zip、winCodeSign 等缓存到本地，之后离线可复用。
+- **输出目录在仓库里时可能打不出来**：解压 electron 之后那步 `rename win-unpacked.tmp -> win-unpacked` 在 `d:\web\toolbox\release\` 下会 `EPERM: operation not permitted`（目标并不存在，是有东西盯着仓库目录、握着刚解压出来的那 126MB 的句柄；连试三次都失败），换成 `-c.directories.output=%TEMP%/xxx` 一次就成。跑一次性实测时直接输出到 `%TEMP%`。
+- **从本仓库的 bash 里跑打包产物必须先 `unset ELECTRON_RUN_AS_NODE`**：这个变量在该 shell 里是设着的，不清掉就跑 `Toolbox.exe`，它会当裸 node 启动并**立刻以 0 退出**——没有窗口、没有日志、什么都不写，看着像打包版启动失败。清掉之后主进程的 `console.log` 会直接打到终端，是最省事的读数方式。
+
+## 打包后各路径的实测值
+
+见 [[app-storage]] 的「打包相关」一节：安装版 / portable 版下 `app.getPath('exe')`、`app.getAppPath()`、`PORTABLE_EXECUTABLE_DIR`、`userData` 各是什么。要点是 **portable 版的 `exe` 指向每次重新解压的随机临时目录**，任何「写到 exe 旁边」的功能都必须改用 `process.env.PORTABLE_EXECUTABLE_DIR`。
 
 ## 验证
 

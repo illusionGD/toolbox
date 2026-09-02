@@ -8,6 +8,7 @@ import {
   SkeletonJson,
   SkeletonBinary,
 } from '@esotericsoftware/spine-pixi-v8';
+import { analyzeBones, type SpineBoneStats } from '@/utils/spine';
 
 // 禁用基于 Web Worker 的纹理解码：Electron 严格 CSP 下 Worker 从 blob 创建脚本会被拦，
 // 改为主线程解码，避免 "Failed to construct 'Worker' ... denied by CSP"。
@@ -68,6 +69,8 @@ export interface UseSpineReturn {
   showBounds: Ref<boolean>;
   /** 当前 spine 的包围盒 / 骨架数据（未加载时为 null）。 */
   boundsInfo: Ref<SpineBoundsInfo | null>;
+  /** 当前 spine 的骨骼数量与最大深度（未加载时为 null）。 */
+  boneStats: Ref<SpineBoneStats | null>;
   /** 加载素材并渲染。 */
   load: (files: SpineFiles) => Promise<void>;
   /** 播放指定动画。 */
@@ -108,6 +111,7 @@ export function useSpine(): UseSpineReturn {
   const speed = ref(1);
   const showBounds = ref(false);
   const boundsInfo = ref<SpineBoundsInfo | null>(null);
+  const boneStats = ref<SpineBoneStats | null>(null);
 
   let app: Application | null = null;
   const spineRef: ShallowRef<Spine | null> = shallowRef(null);
@@ -144,6 +148,7 @@ export function useSpine(): UseSpineReturn {
     }
     baseBounds = null;
     boundsInfo.value = null;
+    boneStats.value = null;
     objectUrls.forEach((u) => URL.revokeObjectURL(u));
     objectUrls.length = 0;
   }
@@ -195,6 +200,8 @@ export function useSpine(): UseSpineReturn {
     baseBounds = { x: setup.x, y: setup.y, width: setup.width, height: setup.height };
 
     animations.value = skeletonData.animations.map((a) => a.name);
+    // 骨骼统计只依赖 skeletonData，与渲染无关，所以放在设动画之前算
+    boneStats.value = analyzeBones(skeletonData.bones);
     loaded.value = true;
     paused.value = false;
 
@@ -334,6 +341,7 @@ export function useSpine(): UseSpineReturn {
     speed,
     showBounds,
     boundsInfo,
+    boneStats,
     load,
     play,
     togglePause,

@@ -10,7 +10,10 @@ import { registerAudioIpc } from './ipc/audio';
 import { registerFontIpc } from './ipc/font';
 import { registerBitmapFontIpc } from './ipc/bitmapFont';
 import { registerExcelIpc } from './ipc/excel';
+import { registerStorageIpc } from './ipc/storage';
 import { registerMediaProtocol, registerMediaScheme } from './protocol/media';
+import { initStoragePaths } from './storage/paths';
+import { registerAppStateSuspender } from './storage/appState';
 import { APP_CHANNELS } from '../shared/channels';
 
 // 特权协议必须在 app ready 之前注册，放在模块顶层是最稳的时机
@@ -53,6 +56,7 @@ function createWindow(): void {
   registerFontIpc(mainWindow);
   registerBitmapFontIpc(mainWindow);
   registerExcelIpc();
+  registerStorageIpc();
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
@@ -61,9 +65,18 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.toolbox.app');
   registerMediaProtocol();
+
+  // 存储路径必须在建窗口之前定下来：渲染进程一挂载就会读应用状态。
+  // 但它绝不能挡住建窗口——catch 掉之后渲染进程会自己降级，总比双击图标毫无反应好。
+  try {
+    await initStoragePaths();
+    registerAppStateSuspender();
+  } catch (error) {
+    console.error('[main] 存储初始化失败，继续启动：', error);
+  }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window);

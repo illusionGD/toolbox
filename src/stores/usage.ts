@@ -2,33 +2,28 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import type { CategoryUsage, UsageRecord } from '@/types/usage';
 import { getTool } from '@/utils/navigation';
+import { readState, writeState } from '@/services/appState';
 
-/** 使用记录本地持久化的存储键。 */
-const USAGE_STORAGE_KEY = 'toolbox.usage';
+/** 使用记录在应用状态里的命名空间。 */
+const USAGE_NS = 'usage';
 /** 最近使用列表最大长度。 */
 const MAX_RECENT = 10;
 
 /**
- * 从 localStorage 读取使用记录。
- * @returns 记录数组，读取失败返回空数组。
+ * 读取使用记录（同步，状态已在挂载前读进内存）。
+ * @returns 记录数组，缺失或格式不对返回空数组。
  */
 function loadRecords(): UsageRecord[] {
-  try {
-    const raw = localStorage.getItem(USAGE_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (r): r is UsageRecord =>
-        typeof r === 'object' && r !== null && typeof (r as UsageRecord).key === 'string',
-    );
-  } catch {
-    return [];
-  }
+  const parsed = readState<unknown>(USAGE_NS);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (r): r is UsageRecord =>
+      typeof r === 'object' && r !== null && typeof (r as UsageRecord).key === 'string',
+  );
 }
 
 /**
- * 使用记录 store：记录各工具使用次数与最近使用，持久化到 localStorage。
+ * 使用记录 store：记录各工具使用次数与最近使用，持久化到数据保存目录。
  * 首页的"最近使用""使用统计"由此驱动。
  */
 export const useUsageStore = defineStore('usage', () => {
@@ -94,9 +89,9 @@ export const useUsageStore = defineStore('usage', () => {
     persist();
   }
 
-  /** 持久化到 localStorage。 */
+  /** 持久化到数据保存目录（防抖写盘）。 */
   function persist(): void {
-    localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(records.value));
+    writeState(USAGE_NS, records.value);
   }
   // #endregion
 

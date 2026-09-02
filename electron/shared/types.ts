@@ -1563,3 +1563,78 @@ export interface ExcelI18nWriteResult {
   /** 告警。 */
   warnings: string[];
 }
+
+/** 可切换的存储目录种类。 */
+export type StorageDirKind = 'cache' | 'data';
+
+/** 数据目录不可写时的自动回退说明。 */
+export interface StorageFallback {
+  /** 本该使用的目录（默认值或用户设置值）。 */
+  requested: string;
+  /** 回退原因（错误码或说明），直接展示给用户。 */
+  reason: string;
+}
+
+/** 应用存储路径信息，设置页展示与判断都用这一份。 */
+export interface AppPathsInfo {
+  /** 当前生效的缓存目录。 */
+  cacheDir: string;
+  /** 当前生效的数据保存目录。 */
+  dataDir: string;
+  /** 缓存目录默认值（系统临时目录下）。 */
+  defaultCacheDir: string;
+  /** 数据目录默认值（安装目录下的 data）。 */
+  defaultDataDir: string;
+  /** 缓存目录是否为用户显式设置（非默认）。 */
+  cacheDirCustom: boolean;
+  /** 数据目录是否为用户显式设置（非默认）。 */
+  dataDirCustom: boolean;
+  /** 缓存目录不可写而自动回退时的说明；null 表示用的就是期望路径。 */
+  cacheDirFallback: StorageFallback | null;
+  /** 数据目录不可写而自动回退时的说明；null 表示用的就是期望路径。 */
+  dataDirFallback: StorageFallback | null;
+  /** 是否 portable（免安装）运行——数据目录取自 PORTABLE_EXECUTABLE_DIR。 */
+  portable: boolean;
+}
+
+/** 目录占用统计。 */
+export interface DirUsage {
+  /** 总字节数。 */
+  bytes: number;
+  /** 文件数（不含目录）。 */
+  files: number;
+}
+
+/** 数据保存目录迁移结果。 */
+export interface MigrateResult {
+  /** 迁移后的数据目录。 */
+  dataDir: string;
+  /** 搬动的顶层条目数。 */
+  movedEntries: number;
+  /** 搬动的总字节数。 */
+  movedBytes: number;
+  /** 实际搬法：同盘 rename / 跨盘复制后删除 / 两者都有。 */
+  mode: 'rename' | 'copy' | 'mixed' | 'none';
+}
+
+/** 清空缓存结果。被占用而删不掉的条目只计入 failed，不让整个操作失败。 */
+export interface ClearCacheResult {
+  /** 释放的字节数。 */
+  freedBytes: number;
+  /** 删掉的顶层条目数。 */
+  deleted: number;
+  /** 删除失败的条目名（含失败原因）。 */
+  failed: string[];
+}
+
+/**
+ * 应用状态整体 blob，存于数据保存目录下的 app-state.json。
+ * 按命名空间平铺（`theme` / `usage` / `tools.image-compress`），一个文件存全部，
+ * 迁移时只需搬这一个文件，也不会出现多文件半新半旧。
+ */
+export interface AppStateBlob {
+  /** 结构版本，便于以后升级迁移。 */
+  version: number;
+  /** 命名空间 → 任意 JSON 值。 */
+  entries: Record<string, unknown>;
+}

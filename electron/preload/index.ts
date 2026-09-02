@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { electronAPI } from '@electron-toolkit/preload';
 import {
   APP_CHANNELS,
+  APP_STATE_CHANNELS,
   AUDIO_CHANNELS,
   BITMAP_FONT_CHANNELS,
   DIALOG_CHANNELS,
@@ -9,10 +10,13 @@ import {
   FILE_CHANNELS,
   FONT_CHANNELS,
   IMAGE_CHANNELS,
+  STORAGE_CHANNELS,
   VIDEO_CHANNELS,
   WINDOW_CHANNELS,
 } from '../shared/channels';
 import type {
+  AppPathsInfo,
+  AppStateBlob,
   AudioConvertOptions,
   AudioConvertResult,
   AudioMeta,
@@ -25,6 +29,7 @@ import type {
   BitmapFontPreview,
   BitmapFontProgress,
   BitmapFontResult,
+  ClearCacheResult,
   CompressOptions,
   CompressResult,
   CropOptions,
@@ -32,6 +37,7 @@ import type {
   CropResult,
   DetectSilenceOptions,
   DetectSilenceResult,
+  DirUsage,
   ExcelI18nOptions,
   ExcelI18nPreviewResult,
   ExcelI18nWriteResult,
@@ -45,6 +51,7 @@ import type {
   FontSubsetOptions,
   FontSubsetResult,
   IpcResponse,
+  MigrateResult,
   OpenFilesOptions,
   PickedFile,
   QrDecodeResult,
@@ -64,6 +71,7 @@ import type {
   SpriteSliceProbe,
   SpriteSliceProbeOptions,
   SpriteSliceResult,
+  StorageDirKind,
   StylizeOptions,
   StylizePreviewOptions,
   StylizeResult,
@@ -584,6 +592,73 @@ const api = {
       options: ExcelI18nOptions,
     ): Promise<IpcResponse<ExcelI18nWriteResult>> =>
       ipcRenderer.invoke(EXCEL_CHANNELS.toJson, filePath, options),
+  },
+
+  /** 存储路径：数据缓存目录与数据保存目录。 */
+  storage: {
+    /**
+     * 读当前生效路径、默认路径、是否自定义与回退情况。
+     * @returns 统一响应，data 为路径信息。
+     */
+    getPaths: (): Promise<IpcResponse<AppPathsInfo>> =>
+      ipcRenderer.invoke(STORAGE_CHANNELS.getPaths),
+    /**
+     * 统计某个目录的占用。
+     * @param kind 目录种类。
+     * @returns 统一响应，data 为字节数与文件数。
+     */
+    dirUsage: (kind: StorageDirKind): Promise<IpcResponse<DirUsage>> =>
+      ipcRenderer.invoke(STORAGE_CHANNELS.dirUsage, kind),
+    /**
+     * 更改数据保存目录并迁移现有数据。
+     * @param target 目标目录绝对路径。
+     * @returns 统一响应，data 为迁移结果。
+     */
+    setDataDir: (target: string): Promise<IpcResponse<MigrateResult>> =>
+      ipcRenderer.invoke(STORAGE_CHANNELS.setDataDir, target),
+    /**
+     * 更改数据缓存目录（不迁移，清空旧目录）。
+     * @param target 目标目录绝对路径。
+     * @returns 统一响应，data 为旧目录释放的字节数。
+     */
+    setCacheDir: (target: string): Promise<IpcResponse<number>> =>
+      ipcRenderer.invoke(STORAGE_CHANNELS.setCacheDir, target),
+    /**
+     * 恢复某个目录为默认值。
+     * @param kind 目录种类。
+     * @returns 统一响应，data 为迁移结果（数据）或释放字节数（缓存）。
+     */
+    resetDir: (kind: StorageDirKind): Promise<IpcResponse<MigrateResult | number>> =>
+      ipcRenderer.invoke(STORAGE_CHANNELS.resetDir, kind),
+    /**
+     * 清空缓存目录内容。
+     * @returns 统一响应，data 为释放字节数与失败清单。
+     */
+    clearCache: (): Promise<IpcResponse<ClearCacheResult>> =>
+      ipcRenderer.invoke(STORAGE_CHANNELS.clearCache),
+    /**
+     * 在系统文件管理器中打开某个目录。
+     * @param kind 目录种类。
+     * @returns 统一响应，data 为 true。
+     */
+    openDir: (kind: StorageDirKind): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(STORAGE_CHANNELS.openDir, kind),
+  },
+
+  /** 应用状态（主题 / 工具配置 / 使用统计）持久化，落在数据保存目录。 */
+  appState: {
+    /**
+     * 读取整个状态 blob。
+     * @returns 统一响应，data 为状态 blob。
+     */
+    read: (): Promise<IpcResponse<AppStateBlob>> => ipcRenderer.invoke(APP_STATE_CHANNELS.read),
+    /**
+     * 按命名空间合并写入。
+     * @param patch 命名空间 → 值（必须是可结构化克隆的纯对象）。
+     * @returns 统一响应，data 为是否已落盘（迁移中会延后写）。
+     */
+    write: (patch: Record<string, unknown>): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(APP_STATE_CHANNELS.write, patch),
   },
 };
 

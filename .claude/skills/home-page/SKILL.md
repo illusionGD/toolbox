@@ -10,13 +10,13 @@ description: Toolbox 首页——推荐工具(tab)、最近使用、使用统计
 ## 决策
 
 - **推荐区**：静态配置（真实工具）。
-- **最近使用 + 统计**：走本地使用记录（localStorage），无数据显示空态。
+- **最近使用 + 统计**：走本地使用记录（持久化到数据保存目录，见 [[app-storage]]），无数据显示空态。
 - **环形图**：纯 SVG 自绘，不引图表库。
 
 ## 文件与职责
 
 - `src/types/usage.d.ts` — `UsageRecord`（key/count/lastUsedAt）、`CategoryUsage`。
-- `src/stores/usage.ts` — `useUsageStore`：records（localStorage `toolbox.usage` 持久化）；getter `totalCount`/`recentTools`(近10,按时间倒序)/`categoryUsage`(按顶级分类聚合占比)；action `recordUsage(key, at)`/`clear`。**`at` 由调用方传时间戳**（store 内不直接取时间）。
+- `src/stores/usage.ts` — `useUsageStore`：records（持久化到 `app-state.json` 的 `usage` 命名空间，见 [[app-storage]]）；getter `totalCount`/`recentTools`(近10,按时间倒序)/`categoryUsage`(按顶级分类聚合占比)；action `recordUsage(key, at)`/`clear`。**`at` 由调用方传时间戳**（store 内不直接取时间）。
 - `src/utils/navigation.ts` — `TOOL_MAP`/`getTool(key)`：扁平化 NAV_ITEMS，每个工具带 `category`/`categoryLabel`（顶级分类）。统计聚合与埋点都靠它。
 - `src/constants/recommend.ts` — `RECOMMEND_GROUPS`：推荐/图片处理/文件管理等 tab 分组的工具卡片。随工具开发补充。
 - `src/utils/format.ts` — 新增 `formatRelativeTime(ts, now?)`（刚刚/N分钟前/…/日期）。
