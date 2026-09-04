@@ -151,6 +151,9 @@
         </div>
       </div>
     </n-card>
+
+    <!-- AI 配置另立组件：本视图已经不短，且 AI 那块本身还会继续长 -->
+    <AiSettingsCard />
   </div>
 </template>
 
@@ -167,6 +170,7 @@ import {
   useMessage,
 } from 'naive-ui';
 import type { AppPathsInfo, DirUsage, StorageDirKind } from '@shared/types';
+import AiSettingsCard from '@/components/ai/AiSettingsCard.vue';
 import { useThemeStore } from '@/stores/theme';
 import { THEME_PRESETS } from '@/constants/theme';
 import { formatBytes } from '@/utils/format';

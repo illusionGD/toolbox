@@ -29,6 +29,8 @@ node_modules/@ffprobe-installer/**
 - `@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.3.node`
 - `@ffmpeg-installer/win32-x64/ffmpeg.exe`、`@ffprobe-installer/win32-x64/ffprobe.exe`
 
+**纯 JS 依赖不用往这个清单里加。** AI SDK 那八个包（`ai` / `@ai-sdk/*` / `zod`）被 `externalizeDepsPlugin` 带进 `node_modules` 后**打包实测确实完整进了 asar 且各带 `package.json`**，直接 `require` 得到，不需要解包——判据是「有没有 `.node` 要 `require` 或 `.exe` 要 `spawn`」，不是「是不是运行期解析的外部依赖」。核查手法与实测条目数见 [[ai-chat]]。
+
 ## 统一图标（一处替换处处生效）
 
 标题栏 logo 是 `@vicons/ionicons5` 的 `CubeOutline`（[TitleBar.vue](src/components/layout/TitleBar.vue)）。唯一图标源：
@@ -43,6 +45,7 @@ node_modules/@ffprobe-installer/**
 - 若哪天报本平台 sharp/ffmpeg 缺失：确认 `@img/sharp-win32-x64`、`@ffmpeg-installer/win32-x64`、`@ffprobe-installer/win32-x64` 在 `node_modules` 下；必要时把它们加进 package.json 的 `optionalDependencies` 或用 `node-linker=hoisted`。
 - 首次打包 electron-builder 会联网下 electron zip、nsis、7zip、winCodeSign 等缓存到本地，之后离线可复用。
 - **输出目录在仓库里时可能打不出来**：解压 electron 之后那步 `rename win-unpacked.tmp -> win-unpacked` 在 `d:\web\toolbox\release\` 下会 `EPERM: operation not permitted`（目标并不存在，是有东西盯着仓库目录、握着刚解压出来的那 126MB 的句柄；连试三次都失败），换成 `-c.directories.output=%TEMP%/xxx` 一次就成。跑一次性实测时直接输出到 `%TEMP%`。
+  - 后来量清了它**与内容有关而不是与目录有关**（见 [[ai-chat]]）：同目录下同数量同体积的普通文件 rename 成功，一放进 Electron 的 `.dll`/`.pak` 就 EPERM；`move` 报「拒绝访问」而 `rm -rf` 却成功，说明**不是句柄占用**，是本机 AV/过滤驱动挑内容。因此有**第二条绕法**：`-c.electronDist=node_modules/electron/dist`——electron-builder 认「已解包的 Electron 目录」，走复制而不是解压+改名，输出可以留在仓库内。要留在 `release/` 下就用它，要图省事就照旧输出到 `%TEMP%`。
 - **从本仓库的 bash 里跑打包产物必须先 `unset ELECTRON_RUN_AS_NODE`**：这个变量在该 shell 里是设着的，不清掉就跑 `Toolbox.exe`，它会当裸 node 启动并**立刻以 0 退出**——没有窗口、没有日志、什么都不写，看着像打包版启动失败。清掉之后主进程的 `console.log` 会直接打到终端，是最省事的读数方式。
 
 ## 打包后各路径的实测值

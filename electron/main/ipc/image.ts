@@ -221,13 +221,53 @@ async function writeOutput(
   return outputPath;
 }
 
+/** {@link probeImage} 的结果。 */
+export interface ImageProbe {
+  path: string;
+  /** 格式（sharp 报的，如 `jpeg` / `png` / `webp`）。 */
+  format: string;
+  width: number;
+  height: number;
+  /** 帧数，>1 就是动图。 */
+  pages: number;
+  /** 是否带 alpha 通道。 */
+  hasAlpha: boolean;
+  /** 文件字节数。 */
+  bytes: number;
+}
+
+/**
+ * 探测一张图片的基本信息（**给 AI 工具用**，界面上没有这个通道）。
+ *
+ * 与 {@link compressOne} 同样先整个读进内存再交给 sharp：从路径读会让 libvips 长期
+ * 持有文件句柄，之后对同一路径写回在 Windows 上报 UNKNOWN / EBUSY。
+ * @param filePath 图片路径。
+ * @returns 尺寸 / 格式 / 帧数 / 字节数。
+ */
+export async function probeImage(filePath: string): Promise<ImageProbe> {
+  const input = await readFile(filePath);
+  const meta = await sharp(input).metadata();
+  return {
+    path: filePath,
+    format: meta.format ?? '未知',
+    width: meta.width ?? 0,
+    height: meta.height ?? 0,
+    pages: meta.pages ?? 1,
+    hasAlpha: Boolean(meta.hasAlpha),
+    bytes: input.length,
+  };
+}
+
 /**
  * 压缩 / 转换单张图片。
  * @param sourcePath 源文件路径。
  * @param options 处理选项。
  * @returns 处理结果（含前后大小、体积变化与实际输出格式）。
  */
-async function compressOne(sourcePath: string, options: CompressOptions): Promise<CompressResult> {
+export async function compressOne(
+  sourcePath: string,
+  options: CompressOptions,
+): Promise<CompressResult> {
   const { format, quality, maxWidth, outputDir, overwrite, keepAnimation, advanced } = options;
 
   const originalStat = await stat(sourcePath);

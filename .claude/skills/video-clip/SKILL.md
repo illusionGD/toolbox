@@ -14,7 +14,7 @@ description: Toolbox 视频剪切/画面裁剪（/media/video 第二个 tab，P4
 - **`/media/video` 的第二个 tab，不新开页**：输出设置面板与压缩 tab 共用同一个 `useToolConfig('media-video')`，同一个概念配两遍只会互相打脸（同 [[media-audio]]）。文件从 `VideoCompressView.vue` **`git mv` 成 `VideoView.vue`**（引用只有 router 一处）。
 - **单文件流程页**，不是批量列表：剪切要看着画面逐个定区间，批量表里没法给每个文件单独定。
 - 时间轴是**缩略图胶片条 + 音频波形上下叠**。
-- 本轮只做**单段** trim + crop，分段导出不做。
+- 只做**单段** trim + crop。分段导出**已于 2026-09-02 正式取消**（用户定：单段够用），不是"以后再补"——要加多段就是重开一轮设计，别把它当遗留 TODO。音频页的「平均分段 / 按静音分割」是另一回事，不受影响。
 
 **`#main`/`#panel`/`#footer` 各只能有一个 `<template #slot>`**，双 tab 靠内部 `v-if/v-else` 分流——Vue 不许两个 `<template #x>` 指向同一具名插槽（精灵图、位图字体两轮都踩过）。原工具栏那排按钮因此从 `#toolbar` 挪进 `#main` 的 bar（`#toolbar` 只剩 tabs），照 AudioView 的 `audio__bar`。
 

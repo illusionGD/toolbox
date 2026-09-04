@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { electronAPI } from '@electron-toolkit/preload';
 import {
+  AI_CHANNELS,
   APP_CHANNELS,
   APP_STATE_CHANNELS,
   AUDIO_CHANNELS,
@@ -15,6 +16,14 @@ import {
   WINDOW_CHANNELS,
 } from '../shared/channels';
 import type {
+  AiChatRequest,
+  AiChatResult,
+  AiConfig,
+  AiConversation,
+  AiImageRef,
+  AiKeyStatus,
+  AiStreamEvent,
+  AiTestResult,
   AppPathsInfo,
   AppStateBlob,
   AudioConvertOptions,
@@ -643,6 +652,143 @@ const api = {
      */
     openDir: (kind: StorageDirKind): Promise<IpcResponse<boolean>> =>
       ipcRenderer.invoke(STORAGE_CHANNELS.openDir, kind),
+  },
+
+  /**
+   * AI 对话。**明文 API Key 只进不出**：写入走 `setKey`，读取只能拿到
+   * {@link AiKeyStatus}（是否存在 + 掩码），渲染进程永远拿不到原文。
+   */
+  ai: {
+    /**
+     * 打开 AI 对话窗口（没开就建，开着就聚焦）。
+     *
+     * 对话框是**独立的无边框窗口**，不是 app 内的浮动面板。
+     * @returns 统一响应。
+     */
+    openWindow: (): Promise<IpcResponse<boolean>> => ipcRenderer.invoke(AI_CHANNELS.openWindow),
+    /**
+     * 切换 AI 窗口置顶。
+     * @param top 是否置顶。
+     * @returns 统一响应，data 为切换后的状态。
+     */
+    setWindowTop: (top: boolean): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(AI_CHANNELS.setWindowTop, top),
+    /**
+     * 最小化 AI 窗口。
+     *
+     * **不要用 `api.window.minimize()`**：那套闭包的是主窗口，在 AI 窗口里调会把主窗口
+     * 最小化掉。DOM 的 `window` 又没有 minimize（只有 `close()`），所以这件事只能过 IPC。
+     * @returns 统一响应，data 为是否真最小化了。
+     */
+    minimizeWindow: (): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(AI_CHANNELS.minimizeWindow),
+    /**
+     * AI 窗口里点 ⚙：聚焦主窗口并让它跳到设置页。
+     * @returns 统一响应，data 为是否推给了主窗口。
+     */
+    openSettings: (): Promise<IpcResponse<boolean>> => ipcRenderer.invoke(AI_CHANNELS.openSettings),
+    /**
+     * 订阅「跳到设置页」推送（只有主窗口会收到）。
+     * @param callback 回调。
+     * @returns 取消订阅函数。
+     */
+    onNavigateSettings: (callback: () => void): (() => void) => {
+      const listener = (): void => callback();
+      ipcRenderer.on(AI_CHANNELS.navigateSettings, listener);
+      return () => ipcRenderer.off(AI_CHANNELS.navigateSettings, listener);
+    },
+    /**
+     * 查若干配置的 key 状态。
+     * @param configIds 配置 id 列表。
+     * @returns 统一响应，data 为与入参同序的状态数组。
+     */
+    listKeyStatus: (configIds: string[]): Promise<IpcResponse<AiKeyStatus[]>> =>
+      ipcRenderer.invoke(AI_CHANNELS.listKeyStatus, configIds),
+    /**
+     * 写入某份配置的 API Key。
+     * @param configId 配置 id。
+     * @param key 明文 key；传空串等同于删除。
+     * @returns 统一响应，data 为写入后的状态（不含明文）。
+     */
+    setKey: (configId: string, key: string): Promise<IpcResponse<AiKeyStatus>> =>
+      ipcRenderer.invoke(AI_CHANNELS.setKey, configId, key),
+    /**
+     * 删除某份配置的 API Key。
+     * @param configId 配置 id。
+     * @returns 统一响应，data 为删除后的空状态。
+     */
+    deleteKey: (configId: string): Promise<IpcResponse<AiKeyStatus>> =>
+      ipcRenderer.invoke(AI_CHANNELS.deleteKey, configId),
+    /**
+     * 把一份配置的 API Key 复制给另一份（「复制配置」用）。
+     *
+     * 明文全程在主进程内，界面只拿到目标的状态。源没 key 时是空操作（不会抹掉目标已有的）。
+     * @param fromId 源配置 id。
+     * @param toId 目标配置 id。
+     * @returns 统一响应，data 为目标配置的 key 状态。
+     */
+    copyKey: (fromId: string, toId: string): Promise<IpcResponse<AiKeyStatus>> =>
+      ipcRenderer.invoke(AI_CHANNELS.copyKey, fromId, toId),
+    /**
+     * 测试连接：真发一次最小请求。
+     * @param config 要测的配置（纯对象，不能是 reactive 代理）。
+     * @param key 可选的临时 key（还没保存就想测时用）；不传则用已存的。
+     * @returns 统一响应，data 为测试结果。
+     */
+    testConnection: (config: AiConfig, key?: string): Promise<IpcResponse<AiTestResult>> =>
+      ipcRenderer.invoke(AI_CHANNELS.testConnection, config, key),
+    /**
+     * 发起一次对话。**流结束才 resolve**，过程中的增量走 `onStream`。
+     * @param request 请求体（纯对象，不能是 reactive 代理）。
+     * @returns 统一响应，data 为最终结果。
+     */
+    chat: (request: AiChatRequest): Promise<IpcResponse<AiChatResult>> =>
+      ipcRenderer.invoke(AI_CHANNELS.chat, request),
+    /**
+     * 取消一个进行中的请求。
+     * @param requestId 请求 id。
+     * @returns 统一响应，data 为是否真的取消到（已结束返回 false）。
+     */
+    cancel: (requestId: string): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(AI_CHANNELS.cancel, requestId),
+    /**
+     * 回答一次工具确认。
+     * @param callId 工具调用 id。
+     * @param approved 允许还是拒绝。
+     * @returns 统一响应，data 为是否有人在等这个回答（历史卡片上点则为 false）。
+     */
+    toolReply: (callId: string, approved: boolean): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(AI_CHANNELS.toolReply, callId, approved),
+    /**
+     * 订阅流式分片。
+     * @param callback 分片回调。
+     * @returns 取消订阅函数。
+     */
+    onStream: (callback: (event: AiStreamEvent) => void): (() => void) => {
+      const listener = (_event: unknown, payload: AiStreamEvent): void => callback(payload);
+      ipcRenderer.on(AI_CHANNELS.chatStream, listener);
+      return () => ipcRenderer.off(AI_CHANNELS.chatStream, listener);
+    },
+    /**
+     * 暂存一张图片到数据目录（顺带降采样）。
+     * @param source 文件绝对路径，或粘贴得到的 data URL。
+     * @returns 统一响应，data 为图片引用。
+     */
+    stageImage: (source: string): Promise<IpcResponse<AiImageRef>> =>
+      ipcRenderer.invoke(AI_CHANNELS.stageImage, source),
+    /**
+     * 读全部会话（AI 窗口打开时调）。
+     * @returns 统一响应，data 为会话数组（按更新时间倒序）。
+     */
+    loadConversations: (): Promise<IpcResponse<AiConversation[]>> =>
+      ipcRenderer.invoke(AI_CHANNELS.loadConversations),
+    /**
+     * 覆盖写全部会话，并清理没人引用的图片。
+     * @param conversations 全量会话（纯对象数组，不能带 reactive 代理）。
+     * @returns 统一响应，data 为清掉的图片文件数。
+     */
+    saveConversations: (conversations: AiConversation[]): Promise<IpcResponse<number>> =>
+      ipcRenderer.invoke(AI_CHANNELS.saveConversations, conversations),
   },
 
   /** 应用状态（主题 / 工具配置 / 使用统计）持久化，落在数据保存目录。 */

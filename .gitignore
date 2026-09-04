@@ -1,7 +1,9 @@
 node_modules
 dist
 out
+out-tbverify
 release
+*.tsbuildinfo
 .DS_Store
 *.log
 .env.local

@@ -13,17 +13,36 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue';
 import { useMessage } from 'naive-ui';
+import { useRouter } from 'vue-router';
 import TitleBar from './TitleBar.vue';
 import SideNav from './SideNav.vue';
 import { useWindowControls } from '@/composables/useWindowControls';
+import { onAiNavigateSettings } from '@/services/ai';
 import { setMessageApi } from '@/utils/feedback';
 
 // #region setup
 const { isMaximized } = useWindowControls();
+const router = useRouter();
 
 // 注册全局 message 实例，供 services 等非组件上下文统一提示
 setMessageApi(useMessage());
+
+/** AI 窗口点齿轮时的推送订阅取消函数。 */
+let offNavigate: (() => void) | null = null;
+
+// AI 对话是独立窗口、自己没有路由，它的 ⚙ 只能让主窗口跳到设置页
+onMounted(() => {
+  offNavigate = onAiNavigateSettings(() => {
+    void router.push('/settings');
+  });
+});
+
+onUnmounted(() => {
+  offNavigate?.();
+  offNavigate = null;
+});
 // #endregion
 </script>
 

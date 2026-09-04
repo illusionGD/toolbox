@@ -1638,3 +1638,268 @@ export interface AppStateBlob {
   /** 命名空间 → 任意 JSON 值。 */
   entries: Record<string, unknown>;
 }
+
+/* ------------------------------- AI 对话 ------------------------------- */
+
+/**
+ * 一份 AI 配置：厂商 + 模型 + 自定义名称 + 可改的地址与参数。
+ * 存在 `app-state.json` 的 `ai.configs` 命名空间里（跟着数据目录迁移）；
+ * **API Key 不在这里**，见 {@link AiKeyStatus}。
+ */
+export interface AiConfig {
+  /** 配置 id（创建时生成，key 与会话都按它关联）。 */
+  id: string;
+  /** 用户自定义名称，如「日常问答」。 */
+  name: string;
+  /** 厂商 id，对应 shared/ai.ts 的 AI_PROVIDERS。 */
+  provider: string;
+  /** 模型 id，直接下发给接口。 */
+  model: string;
+  /** 接口地址（含版本段）。留空时用厂商默认值。 */
+  baseUrl: string;
+  /** 系统提示词，留空则不下发 system。 */
+  systemPrompt: string;
+  /**
+   * 采样温度。**实测**：openai 协议对推理模型会把它整条丢掉并打一条 warning，
+   * 所以这个值「设了不一定生效」，UI 要说明。
+   */
+  temperature: number;
+  /**
+   * 单次回复的最大 token 数。
+   *
+   * **必须显式下发**：实测不传时 anthropic 协议会由 SDK 按 model id 猜一个
+   * `max_tokens`（`claude-3-5-haiku-20241022` → 4096，而 `claude-opus-5` /
+   * `claude-opus-4-8` / `claude-sonnet-4-6` → 128000，认不出的 id → 4096）。
+   * 猜高了真实接口直接 400，且四种协议行为还不一致，因此这里自己定。
+   */
+  maxOutputTokens: number;
+  /** 创建时间戳（毫秒）。 */
+  createdAt: number;
+}
+
+/**
+ * 工具审批策略，**全局一份而不是每配置一份**（用户想的是「我这台机器上要不要拦一下」，
+ * 不是「这个模型要不要拦」）。
+ *
+ * - `off`：**压根不下发 `tools`**。省掉每次请求十几个工具声明的 token，也绕开部分兼容
+ *   端点对 `tools` 直接 400 的问题。
+ * - `ask`（默认）：只读工具直接跑，写盘工具逐次确认。
+ * - `auto`：写盘工具也直接跑，**但覆盖原文件仍然要确认**（见 {@link AiToolCall}）。
+ */
+export type AiToolMode = 'off' | 'ask' | 'auto';
+
+/** 配置集合 + 当前选中项，整体存一个命名空间（`ai`，渲染进程整块覆盖写）。 */
+export interface AiConfigState {
+  /** 全部配置。 */
+  configs: AiConfig[];
+  /** 当前选中的配置 id；为空或失效时由渲染进程回落到第一条。 */
+  activeId: string;
+  /**
+   * 工具调用的审批策略，**全局一份而不是每配置一份**（用户想的是「我这台机器上要不要
+   * 拦一下」，不是「这个模型要不要拦」）。默认 `'ask'`。
+   */
+  toolApproval?: AiToolMode;
+}
+
+/**
+ * AI 对话窗口自己的状态，存在**独立的 `aiWindow` 命名空间**里。
+ *
+ * **不能塞进 `ai`**：那个命名空间是 `aiConfig` store 整块覆盖写的，而这里是**主进程**在
+ * 窗口移动/缩放时写，两边都整块写必然互相抹掉。
+ */
+export interface AiWindowState {
+  /**
+   * 上次的窗口矩形（屏幕坐标，DIP）。**没存过时不要给默认值**——由主进程按主窗口现算，
+   * 且读出来也一定要夹进当前显示器的工作区，否则拔掉外接屏后窗口就开在看不见的地方。
+   */
+  bounds?: { x: number; y: number; width: number; height: number };
+  /** 是否置顶（盖住其他程序）。 */
+  alwaysOnTop?: boolean;
+}
+
+/**
+ * 某份配置的 key 状态。**明文永不回渲染进程**，只回是否存在与掩码提示。
+ */
+export interface AiKeyStatus {
+  /** 对应的配置 id。 */
+  configId: string;
+  /** 是否已存 key。 */
+  hasKey: boolean;
+  /** 掩码提示，如 `sk-a…7890`；无 key 时为空串。 */
+  hint: string;
+  /**
+   * 是否真的加密存储。`safeStorage.isEncryptionAvailable()` 为 false 时降级明文，
+   * 此处为 false，设置页必须显著提示——**不许假装加密**。
+   */
+  encrypted: boolean;
+}
+
+/** 一张已暂存到数据目录的图片。 */
+export interface AiImageRef {
+  /** 内容哈希（同时是文件名主干）。 */
+  id: string;
+  /** 落盘绝对路径（在 `<dataDir>/ai/images/` 下）。 */
+  path: string;
+  /** MIME 类型，随请求下发给各家接口。 */
+  mediaType: string;
+  /** 降采样后的宽。 */
+  width: number;
+  /** 降采样后的高。 */
+  height: number;
+  /** 降采样后的字节数。 */
+  bytes: number;
+  /** 列表用的小缩略图 data URL。 */
+  thumbnailDataUrl: string;
+}
+
+/**
+ * 一次工具调用的记录（**既是界面模型也是落盘模型**，跟着 {@link AiMessage} 一起存）。
+ *
+ * 同一个 `callId` 会经历 `pending → running → done`，主进程每次推**完整一条**、渲染
+ * 进程按 `callId` upsert——幂等，中途断一片也不会留下半张卡片。
+ */
+export interface AiToolCall {
+  /** 这次调用的 id（主进程生成，确认往返也按它对应）。 */
+  callId: string;
+  /** 工具名。 */
+  name: string;
+  /** 只读还是会写盘。`write` 在 `ask` 模式下逐次确认。 */
+  kind: 'read' | 'write';
+  /** 给人看的一行参数摘要，由工具自己的 `summarize` 生成。 */
+  summary: string;
+  /**
+   * 状态。`interrupted` 是**从磁盘读回来时补的**：上次关窗口时挂着的确认卡，重开后
+   * 没有任何 promise 在等它，按钮点了也没人接。
+   */
+  status: 'pending' | 'running' | 'done' | 'denied' | 'error' | 'interrupted';
+  /** 结果摘要（成功一行、失败是原因）。**不放全量结果**，会话文件不该被它撑大。 */
+  result?: string;
+  /** 开始时间戳（毫秒）。 */
+  startedAt: number;
+  /** 耗时毫秒（跑完才有）。 */
+  elapsed?: number;
+}
+
+/** 一条对话消息（既是界面模型也是落盘模型）。 */
+export interface AiMessage {
+  /** 消息 id。 */
+  id: string;
+  /** 角色。 */
+  role: 'user' | 'assistant';
+  /** 正文。 */
+  text: string;
+  /** 推理过程（deepseek-reasoner 那类会有），与正文分开累积。 */
+  reasoning?: string;
+  /** 附带的图片。 */
+  images?: AiImageRef[];
+  /** 创建时间戳（毫秒）。 */
+  createdAt: number;
+  /** 失败原因（中文可读）；有值时这条消息是错误态。 */
+  error?: string;
+  /** 是否被用户取消。 */
+  canceled?: boolean;
+  /** SDK 的告警（如「该模型不支持 temperature」），如实展示而不是吞掉。 */
+  warnings?: string[];
+  /** 这条助手消息里发生过的工具调用，按发生顺序。 */
+  toolCalls?: AiToolCall[];
+}
+
+/** 下发给主进程的单条消息（不带 id / 时间等界面字段）。 */
+export interface AiSendMessage {
+  /** 角色。 */
+  role: 'user' | 'assistant';
+  /** 正文。 */
+  text: string;
+  /** 图片路径与类型（主进程自己读文件，渲染进程不碰 base64）。 */
+  images?: { path: string; mediaType: string }[];
+}
+
+/** 一次对话请求。 */
+export interface AiChatRequest {
+  /** 请求 id，取消与流式分片都按它对应。 */
+  requestId: string;
+  /**
+   * 用哪份配置。**配置整份随请求下发**而不是只给 id：配置存在 `app-state.json` 里、
+   * 由渲染进程管，主进程不读那个文件（读了就是两份状态，必然漂移）。主进程只按
+   * `config.id` 去自己的密钥库取 key。
+   */
+  config: AiConfig;
+  /** 完整上下文（含本轮用户消息）。 */
+  messages: AiSendMessage[];
+  /**
+   * 工具审批策略。**跟着请求下发而不是主进程去读 app-state**，同 `config` 一个理由。
+   * `'off'` 时主进程压根不给 `streamText` 传 `tools`。
+   */
+  toolMode: AiToolMode;
+}
+
+/** 流式分片：主进程 → 渲染进程。 */
+export interface AiStreamEvent {
+  /** 对应的请求 id。 */
+  requestId: string;
+  /** 分片类型。 */
+  type: 'text' | 'reasoning' | 'warning' | 'error' | 'abort' | 'tool';
+  /** text / reasoning 的增量文本。 */
+  delta?: string;
+  /** warning / error 的说明文本。 */
+  message?: string;
+  /** `tool` 分片的完整记录（**不是增量**，按 `callId` upsert）。 */
+  toolCall?: AiToolCall;
+}
+
+/** token 用量。各家字段名不同，由 SDK 归一后取这三项。 */
+export interface AiUsage {
+  /** 输入 token。 */
+  inputTokens?: number;
+  /** 输出 token。 */
+  outputTokens?: number;
+  /** 合计。 */
+  totalTokens?: number;
+}
+
+/** 一次对话的最终结果（`ai:chat` 在流结束时才 resolve）。 */
+export interface AiChatResult {
+  /** 完整正文。 */
+  text: string;
+  /** 完整推理过程。 */
+  reasoning: string;
+  /** 用量；取不到时为 undefined（取消时一定取不到）。 */
+  usage?: AiUsage;
+  /** 结束原因（stop / length / error / …）。 */
+  finishReason: string;
+  /** 是否因取消而结束。 */
+  canceled: boolean;
+  /** SDK 告警。 */
+  warnings: string[];
+}
+
+/** 「测试连接」结果。 */
+export interface AiTestResult {
+  /** 是否连通。 */
+  ok: boolean;
+  /** 成功时是模型回的一小段文本，失败时是中文可读原因（含状态码）。 */
+  message: string;
+  /** 耗时毫秒。 */
+  latencyMs: number;
+}
+
+/** 一个会话。存 `<dataDir>/ai/conversations.json`，不进 app-state.json。 */
+export interface AiConversation {
+  /** 会话 id。 */
+  id: string;
+  /** 标题（默认取首条用户消息前若干字）。 */
+  title: string;
+  /**
+   * 标题是否由用户手动改过。为 true 时**自动标题不许再覆盖**——否则用户刚重命名，
+   * 下一条消息就把它改回去。
+   */
+  titleCustom?: boolean;
+  /** 消息列表。 */
+  messages: AiMessage[];
+  /** 最后一次使用的配置 id。 */
+  configId: string;
+  /** 创建时间戳（毫秒）。 */
+  createdAt: number;
+  /** 更新时间戳（毫秒）。 */
+  updatedAt: number;
+}

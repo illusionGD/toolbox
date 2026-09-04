@@ -29,7 +29,7 @@ description: Toolbox 通用能力——文件对话框/拖拽 IPC、渲染进程
   - `FileList.vue` — 操作栏（添加文件/文件夹/清空）+ 拖拽区 + `n-data-table` + 底部统计。**props**：`items`、`columns?`(自定义列，默认名/大小/状态/操作)、`accept?`、`acceptLabel?`；**emits**：`add`/`remove`/`clear`。父组件持有 items 并处理去重。
   - `TaskProgress.vue` — 进度条，按 `status` 着色。
   - `StatusTag.vue` — 任务状态标签（待处理/处理中/已完成/失败）。
-- `src/views/SettingsView.vue` — 设置页，接入主题主色（预设+取色器+恢复默认）+「存储」卡片（数据缓存/保存路径，见 [[app-storage]]）。卡片**不设固定宽度**、跟着内容区走；每行「说明 / 控件」两列的切换用 **容器查询**（`.settings` 上 `container: settings / inline-size`，`@container settings (min-width: 720px)` 切 grid 两列）——**不能用媒体查询**：侧栏固定占 200px，视口宽度不等于内容区宽度，按视口判断会在窄窗口下切错。720px 这个门槛的实际效果是默认 1120 窗口（内容区约 870）走两列、拖到最小窗口 900（约 650）退回上下堆叠。行内只放 `__label` 与 `__control` 两个直接子元素，行级提示（回退警告）要放进 `__control` 里，否则会变成第三个网格项把两列布局挤乱。
+- `src/views/SettingsView.vue` — 设置页，接入主题主色（预设+取色器+恢复默认）+「存储」卡片（数据缓存/保存路径，见 [[app-storage]]）+「AI 配置」卡片（多份厂商配置 / API Key / 测试连接，另立 `components/ai/AiSettingsCard.vue`，见 [[ai-chat]]）。卡片**不设固定宽度**、跟着内容区走；每行「说明 / 控件」两列的切换用 **容器查询**（`.settings` 上 `container: settings / inline-size`，`@container settings (min-width: 720px)` 切 grid 两列）——**不能用媒体查询**：侧栏固定占 200px，视口宽度不等于内容区宽度，按视口判断会在窄窗口下切错。720px 这个门槛的实际效果是默认 1120 窗口（内容区约 870）走两列、拖到最小窗口 900（约 650）退回上下堆叠。行内只放 `__label` 与 `__control` 两个直接子元素，行级提示（回退警告）要放进 `__control` 里，否则会变成第三个网格项把两列布局挤乱。**设置页够长了，新增大块内容一律另立组件文件**（AI 配置卡就是这么做的）。
 
 ## 关键约定
 

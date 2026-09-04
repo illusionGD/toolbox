@@ -6,17 +6,19 @@
         <h1 class="home__title">欢迎使用多功能工具箱</h1>
         <p class="home__subtitle">高效、实用、便捷的工具集合</p>
       </div>
-      <n-card class="home__usage-card" size="small">
-        <div class="home__usage-card-inner">
-          <div>
-            <p class="home__usage-count">已使用 {{ usageStore.totalCount }} 次</p>
-            <p class="home__usage-hint">感谢你的使用</p>
-          </div>
-          <n-icon :size="28" color="#fff" class="home__usage-icon">
-            <FlashOutline />
-          </n-icon>
-        </div>
-      </n-card>
+      <!--
+        原先这里是「已使用 N 次」卡片。换成 AI 入口不丢信息：总次数在下方「使用统计」
+        环形图中心还有一份
+      -->
+      <button v-if="can('ai-chat')" class="home__ai-entry" @click="openAiWindowApi()">
+        <span class="home__ai-icon">
+          <n-icon :size="24" color="#fff"><SparklesOutline /></n-icon>
+        </span>
+        <span class="home__ai-text">
+          <span class="home__ai-title">AI 助手</span>
+          <span class="home__ai-hint">{{ aiHint }}</span>
+        </span>
+      </button>
     </div>
 
     <!-- 推荐工具（分类 tab） -->
@@ -85,18 +87,23 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { NButton, NCard, NIcon, NTabPane, NTabs } from 'naive-ui';
-import { FlashOutline } from '@vicons/ionicons5';
+import { SparklesOutline } from '@vicons/ionicons5';
 import { RECOMMEND_GROUPS } from '@/constants/recommend';
 import { colorAt } from '@/constants/chart';
 import { useUsageStore } from '@/stores/usage';
+import { useAiConfigStore } from '@/stores/aiConfig';
+import { openAiWindowApi } from '@/services/ai';
 import { useToolLauncher } from '@/composables/useToolLauncher';
+import { useEntitlement } from '@/composables/useEntitlement';
 import { getTool } from '@/utils/navigation';
 import { formatRelativeTime } from '@/utils/format';
 import DonutChart from '@/components/common/DonutChart.vue';
 
 // #region setup
 const usageStore = useUsageStore();
+const aiConfig = useAiConfigStore();
 const { openTool } = useToolLauncher();
+const { can } = useEntitlement();
 
 const activeTab = ref(RECOMMEND_GROUPS[0]?.key ?? 'recommend');
 
@@ -116,6 +123,11 @@ const donutSegments = computed(() =>
     value: item.count,
     color: colorAt(i),
   })),
+);
+
+/** 入口副标题：没配置时直接把「要先去设置」说出来，别让用户点进去才发现。 */
+const aiHint = computed(() =>
+  aiConfig.configs.length === 0 ? '去设置页添加配置' : (aiConfig.activeConfig?.name ?? '开始对话'),
 );
 // #endregion
 </script>
@@ -145,40 +157,59 @@ const donutSegments = computed(() =>
     color: var(--tb-text-secondary);
   }
 
-  &__usage-card {
-    width: 260px;
-    flex-shrink: 0;
-    background: linear-gradient(135deg, var(--tb-bg-elevated), var(--tb-bg-surface));
-    border: 1px solid var(--tb-border);
-  }
-
-  &__usage-card-inner {
+  &__ai-entry {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: var(--tb-space-3);
+    width: 260px;
+    flex-shrink: 0;
+    padding: var(--tb-space-3);
+    text-align: left;
+    background: var(--tb-bg-surface);
+    border: 1px solid var(--tb-border);
+    border-radius: var(--tb-radius-md);
+    cursor: pointer;
+    transition:
+      border-color 0.15s,
+      transform 0.15s;
+
+    &:hover {
+      border-color: var(--tb-color-primary);
+      transform: translateY(-2px);
+    }
   }
 
-  &__usage-count {
-    margin: 0 0 4px;
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--tb-text-primary);
-  }
-
-  &__usage-hint {
-    margin: 0;
-    font-size: 12px;
-    color: var(--tb-text-secondary);
-  }
-
-  &__usage-icon {
+  &__ai-icon {
     display: flex;
     align-items: center;
     justify-content: center;
     width: 44px;
     height: 44px;
+    flex-shrink: 0;
     border-radius: 50%;
+    // 紫色只在这一处强调，背景仍是中性面板色
     background: var(--tb-color-primary);
+  }
+
+  &__ai-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  &__ai-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--tb-text-primary);
+  }
+
+  &__ai-hint {
+    font-size: 12px;
+    color: var(--tb-text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &__tools-grid {

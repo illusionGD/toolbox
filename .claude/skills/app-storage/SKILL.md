@@ -34,7 +34,15 @@ const db = dataPath('presets.json'); // 要保住
 
 **指针不能放在被指的目录里**。`settings.json` 记的是「数据目录在哪」，放进数据目录就等于自己指自己——用户一改路径，下次启动去默认位置找不到它，路径设置凭空丢失。所以它固定在 `app.getPath('userData')`，且**只存被用户改过的键**（删空键而不是写默认值），这样默认值以后变了也能跟着走。
 
-`app-state.json` 是**一个文件装全部命名空间**（`theme` / `usage` / `tools.<toolKey>`）：迁移时只搬一个文件，也不会出现多文件半新半旧。写盘一律临时文件 + `rename`。
+`app-state.json` 是**一个文件装全部命名空间**（`theme` / `usage` / `tools.<toolKey>` / `ai`）：迁移时只搬一个文件，也不会出现多文件半新半旧。写盘一律临时文件 + `rename`。
+
+**不是所有落盘都该进这两处。** 到目前为止有三类例外，理由各不相同（详见 [[ai-chat]]）：
+
+| 东西 | 存哪 | 为什么不进 `app-state.json` / `<dataDir>` |
+|---|---|---|
+| **API Key** | `<userData>/ai-keys.json`，逐条 `safeStorage` 加密 | 与 `settings.json` 同一条理由的延伸：数据目录设计成**可搬走、可指网盘**，把凭据一起搬出去是坑；且 Windows 的 safeStorage 是 DPAPI、绑当前账户，搬走也解不开。**实测密文跨进程/跨重启解得开**，不可用时不许假装加密（落明文 + 设置页提示） |
+| 对话记录 | `<dataDir>/ai/conversations.json`，懒加载 + 防抖写 | `app-state.json` 启动时**同步**读进内存，往里塞只增不减的聊天记录会让冷启动越来越慢。归属数据目录没错，只是要自己一个文件 |
+| 对话里的图片 | `<dataDir>/ai/images/<hash>.<ext>` | 放 cacheDir 会被「清空缓存」连聊天历史一起打断——判据是「用户按清空时愿不愿意丢它」，不是「是不是派生文件」 |
 
 ## 实测结论（都推翻过一次直觉，别按文档写）
 
@@ -161,6 +169,6 @@ src/views/SettingsView.vue        「存储」卡片
 ### 跑打包版做实测时的两个坑
 
 1. **本仓库这个 bash 里 `ELECTRON_RUN_AS_NODE` 是设着的**。不 `unset` 就直接跑打包出来的 `Toolbox.exe`，它会当成裸 node 启动、**立刻以 0 退出**：没有窗口、没有日志、什么都不写。看着像「打包版启动失败」，其实一行代码都没执行。排查花了三轮才想到。
-2. **electron-builder 的输出目录不能放在仓库里**：`--dir` 解压 electron 后那步 `rename win-unpacked.tmp -> win-unpacked` 在 `d:\web\toolbox\release\` 下必定 `EPERM`（有东西盯着仓库目录、握着刚解压出来的句柄），换到 `%TEMP%` 下就一次成功。要跑实测就 `-c.directories.output=%TEMP%/xxx`。
+2. **electron-builder 的输出目录不能放在仓库里**：`--dir` 解压 electron 后那步 `rename win-unpacked.tmp -> win-unpacked` 在 `d:\web\toolbox\release\` 下必定 `EPERM`，换到 `%TEMP%` 下就一次成功。要跑实测就 `-c.directories.output=%TEMP%/xxx`。后来量清了它**与内容有关不是与句柄有关**（同目录同体积的普通文件 rename 得动，一放进 Electron 的 `.dll`/`.pak` 就 EPERM），第二条绕法是 `-c.electronDist=node_modules/electron/dist`，输出可留仓库内。见 [[ai-chat]]、[[packaging]]。
 
 从 bash 里 `unset ELECTRON_RUN_AS_NODE` 后启动打包版，主进程的 `console.log` 会直接打到终端——`[storage] cache=... / data=...` 那两行就是最省事的读数方式。

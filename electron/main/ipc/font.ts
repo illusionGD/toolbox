@@ -80,7 +80,7 @@ function firstFont(data: Buffer): fontkit.Font {
  * @param filePath 字体路径。
  * @returns 元信息。
  */
-async function probeFont(filePath: string): Promise<FontMeta> {
+export async function probeFont(filePath: string): Promise<FontMeta> {
   const data = await readFile(filePath);
   const font = firstFont(data);
   return {

@@ -168,6 +168,70 @@ export const STORAGE_CHANNELS = {
   openDir: 'storage:openDir',
 } as const;
 
+/**
+ * AI 对话通道。
+ *
+ * 所有网络调用都在主进程：① API Key 绝不进渲染进程；② Anthropic 在浏览器环境还要
+ * 额外的 dangerous-direct-browser-access 头、各家 CORS 也不一致，主进程一概没这问题；
+ * ③ 第二轮的工具调用本来就得在主进程跑。
+ */
+export const AI_CHANNELS = {
+  /**
+   * 打开 AI 对话窗口（没开就建，开着就聚焦）。
+   *
+   * 对话框是**独立的无边框窗口**而不是 app 内的浮动面板：用户要求能拖到第二块屏幕、
+   * 能置顶盖住其他程序，这两件事 DOM 面板做不到。
+   */
+  openWindow: 'ai:openWindow',
+  /** 切换 AI 窗口置顶。 */
+  setWindowTop: 'ai:setWindowTop',
+  /**
+   * 最小化 AI 窗口。
+   *
+   * **DOM 的 `window` 没有 minimize**（`window.close()` 有，所以 ✕ 不用过 IPC，最小化必须过），
+   * 而这个窗口里 `window.api.window.minimize()` 控的是**主窗口**（那套 IPC 闭包的是主窗口），
+   * 所以只能给它一条专用通道——同 `setWindowTop`。
+   */
+  minimizeWindow: 'ai:minimizeWindow',
+  /** AI 窗口里的 ⚙：聚焦主窗口并让它跳到设置页。 */
+  openSettings: 'ai:openSettings',
+  /** 主进程 → 主窗口：跳到设置页（`openSettings` 的下半程）。 */
+  navigateSettings: 'ai:navigateSettings',
+  /** 各配置的 key 状态（只回是否存在 + 掩码，明文不出主进程）。 */
+  listKeyStatus: 'ai:listKeyStatus',
+  /** 写入某份配置的 key。 */
+  setKey: 'ai:setKey',
+  /** 删除某份配置的 key。 */
+  deleteKey: 'ai:deleteKey',
+  /**
+   * 把一份配置的 key 复制给另一份（「复制配置」用）。
+   *
+   * 存在的理由：明文永不回渲染进程，界面拿不到源 key，所以复制这一步只能在主进程完成。
+   */
+  copyKey: 'ai:copyKey',
+  /** 测试连接：真发一次最小请求。 */
+  testConnection: 'ai:testConnection',
+  /** 发起对话，**流结束才 resolve**（同 video:transcode）。 */
+  chat: 'ai:chat',
+  /** 主进程 → 渲染进程：流式分片推送。 */
+  chatStream: 'ai:chatStream',
+  /** 按 requestId 中断。 */
+  cancel: 'ai:cancel',
+  /**
+   * 回答一次工具确认（允许 / 拒绝）。
+   *
+   * **只需要这一个新通道**：工具事件本身搭现成的 `chatStream` 走（`type:'tool'`），
+   * 所以渲染进程那边一处订阅全包了。
+   */
+  toolReply: 'ai:toolReply',
+  /** 把图片暂存到数据目录并降采样。 */
+  stageImage: 'ai:stageImage',
+  /** 读全部会话（AI 窗口打开时懒加载）。 */
+  loadConversations: 'ai:loadConversations',
+  /** 覆盖写全部会话（防抖后调用）。 */
+  saveConversations: 'ai:saveConversations',
+} as const;
+
 /** 应用状态（主题 / 各工具配置 / 使用统计）持久化通道，落在数据保存目录。 */
 export const APP_STATE_CHANNELS = {
   /** 读取整个状态 blob（渲染进程启动时读一次）。 */

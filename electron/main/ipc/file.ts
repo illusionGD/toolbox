@@ -1,6 +1,6 @@
 import { type BrowserWindow, dialog, shell } from 'electron';
-import { basename, dirname, extname, join } from 'path';
-import { readdir, readFile, rename, stat, writeFile } from 'fs/promises';
+import { basename, dirname, extname, isAbsolute, join } from 'path';
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'fs/promises';
 import { FILE_CHANNELS } from '../../shared/channels';
 import type {
   RenameBatchResult,
@@ -171,11 +171,14 @@ async function walk(
 
 /**
  * 扫描目录并汇总文件信息。
- * @param win 用于推送进度的窗口。
+ * @param win 用于推送进度的窗口；**AI 工具调用传 null**（那边没有监听进度通道）。
  * @param options 扫描选项。
  * @returns 扫描结果（含截断/取消标记与错误列表）。
  */
-async function scanDirectory(win: BrowserWindow, options: ScanOptions): Promise<ScanResult> {
+export async function scanDirectory(
+  win: BrowserWindow | null,
+  options: ScanOptions,
+): Promise<ScanResult> {
   const started = Date.now();
   const token = { canceled: false };
   runningScans.set(options.scanId, token);
@@ -195,9 +198,9 @@ async function scanDirectory(win: BrowserWindow, options: ScanOptions): Promise<
     lastNotifyCount: 0,
   };
 
-  /** 向渲染进程推送进度（窗口已销毁时静默跳过）。 */
+  /** 向渲染进程推送进度（没给窗口或窗口已销毁时静默跳过）。 */
   const notify = (scanned: number, currentDir: string): void => {
-    if (win.isDestroyed()) return;
+    if (!win || win.isDestroyed()) return;
     win.webContents.send(FILE_CHANNELS.scanProgress, {
       scanId: options.scanId,
       scanned,
@@ -377,7 +380,7 @@ async function preflight(
  * @param pairs 重命名请求。
  * @returns 执行结果。
  */
-async function renameBatch(pairs: RenamePair[]): Promise<RenameBatchResult> {
+export async function renameBatch(pairs: RenamePair[]): Promise<RenameBatchResult> {
   const { planned, conflicts } = await preflight(pairs);
   if (conflicts.length > 0) {
     // 一个文件都不碰
@@ -436,6 +439,32 @@ async function renameBatch(pairs: RenamePair[]): Promise<RenameBatchResult> {
   }
 
   return { done, conflicts: [], failures, twoPhase };
+}
+
+/**
+ * 把文本写到指定绝对路径（**给 AI 工具用，没有保存对话框**）。
+ *
+ * 与 {@link saveText} 是两件事：那个要弹 `showSaveDialog`，路径由用户当场选；这个的路径
+ * 是调用方（模型）给的，所以复用重命名那套的名字校验，并且**默认不覆盖已有文件**——
+ * 是否允许覆盖由上层的确认流程决定，不在这里悄悄放行。
+ * @param filePath 目标绝对路径。
+ * @param content 文本内容。
+ * @param overwrite 目标已存在时是否覆盖。
+ * @returns 写入路径与字节数。
+ */
+export async function writeTextFile(
+  filePath: string,
+  content: string,
+  overwrite: boolean,
+): Promise<{ path: string; bytes: number }> {
+  if (!isAbsolute(filePath)) throw new Error('必须是绝对路径');
+  const reason = checkName(basename(filePath), filePath);
+  if (reason) throw new Error(reason);
+  if (!overwrite && (await exists(filePath))) throw new Error('目标文件已存在');
+
+  await mkdir(dirname(filePath), { recursive: true });
+  await writeFile(filePath, content, 'utf-8');
+  return { path: filePath, bytes: Buffer.byteLength(content, 'utf-8') };
 }
 
 /**

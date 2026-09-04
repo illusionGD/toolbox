@@ -1,6 +1,7 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
+import { registerExternalLinkGuards } from './externalLinks';
 import { registerWindowControlIpc } from './ipc/window';
 import { registerDialogIpc } from './ipc/dialog';
 import { registerFileIpc } from './ipc/file';
@@ -11,6 +12,8 @@ import { registerFontIpc } from './ipc/font';
 import { registerBitmapFontIpc } from './ipc/bitmapFont';
 import { registerExcelIpc } from './ipc/excel';
 import { registerStorageIpc } from './ipc/storage';
+import { registerAiIpc } from './ipc/ai';
+import { initPanelWindow } from './ai/panelWindow';
 import { registerMediaProtocol, registerMediaScheme } from './protocol/media';
 import { initStoragePaths } from './storage/paths';
 import { registerAppStateSuspender } from './storage/appState';
@@ -42,10 +45,8 @@ function createWindow(): void {
     mainWindow.show();
   });
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    void shell.openExternal(details.url);
-    return { action: 'deny' };
-  });
+  // 外链兜底两道口子（window.open + 普通 a href），见 externalLinks.ts
+  registerExternalLinkGuards(mainWindow.webContents);
 
   registerWindowControlIpc(mainWindow);
   registerDialogIpc(mainWindow);
@@ -57,6 +58,9 @@ function createWindow(): void {
   registerBitmapFontIpc(mainWindow);
   registerExcelIpc();
   registerStorageIpc();
+  registerAiIpc();
+  // AI 对话是独立窗口：把主窗口交给它当宿主（默认位置 + 设置页跳转 + 跟着一起关）
+  initPanelWindow(mainWindow);
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);

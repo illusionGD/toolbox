@@ -358,13 +358,13 @@ async function transcodeToGif(
  * 1. ffmpeg 不能读写同一个文件——输出一开就把还在读的输入截断了，覆盖模式必坏。
  * 2. 取消/失败时输出必定是坏文件（来不及写容器索引），删掉临时文件用户就看不到残骸。
  * 这与图片工具不同：sharp 是在内存里出完整 Buffer 才落盘，天然没有半成品。
- * @param win 用于推送进度的窗口。
+ * @param win 用于推送进度的窗口；**AI 工具调用传 null**（那边没有监听进度通道）。
  * @param sourcePath 源文件路径。
  * @param options 转码选项。
  * @returns 转码结果（含取消标记）。
  */
-async function transcodeOne(
-  win: BrowserWindow,
+export async function transcodeOne(
+  win: BrowserWindow | null,
   sourcePath: string,
   options: TranscodeOptions,
 ): Promise<TranscodeResult> {
@@ -399,9 +399,9 @@ async function transcodeOne(
       ? options.trim.end - options.trim.start
       : meta.duration;
 
-  /** 推进度到渲染进程（窗口已销毁时静默跳过）。 */
+  /** 推进度到渲染进程（没给窗口或窗口已销毁时静默跳过）。 */
   const pushProgress = (percent: number, outTime: number, speed: number): void => {
-    if (win.isDestroyed()) return;
+    if (!win || win.isDestroyed()) return;
     win.webContents.send(VIDEO_CHANNELS.transcodeProgress, {
       taskId: options.taskId,
       outTime,

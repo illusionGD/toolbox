@@ -69,7 +69,7 @@ async function loadWorkbook(filePath: string): Promise<ExcelJS.Workbook> {
  * @param headerRow 表头行行号（1-based）。
  * @returns 结构信息。
  */
-async function probeExcel(filePath: string, headerRow: number): Promise<ExcelProbeResult> {
+export async function probeExcel(filePath: string, headerRow: number): Promise<ExcelProbeResult> {
   const wb = await loadWorkbook(filePath);
   const sheets: ExcelSheetInfo[] = [];
   wb.eachSheet((ws) => {

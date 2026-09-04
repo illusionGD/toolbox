@@ -214,6 +214,30 @@ export async function flushAppState(): Promise<void> {
 }
 
 /**
+ * 重新读一遍磁盘状态，覆盖内存快照。
+ *
+ * **多窗口场景需要这条**：AI 对话是独立窗口，用户在主窗口设置页改完 AI 配置后，
+ * 那个窗口的内存快照还是打开时读到的旧值，切回来必须重读。
+ *
+ * 待写队列先 flush 掉，否则本窗口刚改还没落盘的东西会被磁盘上的旧值盖掉。
+ * 降级模式下从 localStorage 重收。
+ */
+export async function refreshAppState(): Promise<void> {
+  await flushAppState();
+  if (degraded) {
+    entries = collectLegacy();
+    return;
+  }
+  try {
+    const blob = await unwrap<AppStateBlob>(window.api.appState.read(), { silent: true });
+    entries = blob?.entries ?? {};
+  } catch (error) {
+    // 刷新失败保留旧快照即可，不该把界面变成空配置
+    console.warn('[appState] 重新读取失败，沿用内存快照：', error);
+  }
+}
+
+/**
  * 状态是否处于降级（写不进数据目录，退回浏览器本地存储）。
  * @returns 降级标记与原因。
  */

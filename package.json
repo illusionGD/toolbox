@@ -28,6 +28,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "lint": "eslint . --fix",
     "format": "prettier --write .",
+    "verify:ai": "node scripts/tbverify/run.cjs",
     "commit": "git add . && git-cz",
     "push": "npm run commit && git push --follow-tags"
   },
@@ -37,24 +38,32 @@
     }
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "3.0.116",
+    "@ai-sdk/google": "3.0.120",
+    "@ai-sdk/openai": "3.0.106",
+    "@ai-sdk/openai-compatible": "2.0.74",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@esotericsoftware/spine-pixi-v8": "~4.2.119",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "@vicons/ionicons5": "^0.13.0",
+    "ai": "6.0.275",
     "cn-font-split": "^7.4.3",
     "exceljs": "^4.4.0",
     "fontkit": "^2.0.4",
     "fontverter": "^2.0.0",
+    "highlight.js": "11.11.1",
     "jsqr": "^1.4.0",
+    "marked": "18.0.11",
     "naive-ui": "^2.44.1",
     "pinia": "^4.0.2",
     "pixi.js": "^8.19.0",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.3",
     "subset-font": "^2.5.0",
-    "vue-router": "^5.2.0"
+    "vue-router": "^5.2.0",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^1.0.1",

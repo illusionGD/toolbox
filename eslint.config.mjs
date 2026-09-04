@@ -11,7 +11,15 @@ export default defineConfigWithVueTs(
 
   {
     name: 'app/files-to-ignore',
-    ignores: ['**/dist/**', '**/out/**', '**/node_modules/**'],
+    // scripts/tbverify 是 node 直跑的桩测脚本，横跨主进程与渲染进程两套 tsconfig，
+    // 不属于任何一个 project，交给 eslint 只会得到 parsing error；out-tbverify 是它的产物。
+    ignores: [
+      '**/dist/**',
+      '**/out/**',
+      '**/out-tbverify/**',
+      '**/node_modules/**',
+      'scripts/tbverify/**',
+    ],
   },
 
   {

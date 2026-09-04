@@ -1,5 +1,6 @@
 dist
 out
+out-tbverify
 node_modules
 pnpm-lock.yaml
 *.md

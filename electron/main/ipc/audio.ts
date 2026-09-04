@@ -277,21 +277,21 @@ async function outputDuration(filePath: string): Promise<number> {
 }
 
 /**
- * 推进度到渲染进程（窗口已销毁时静默跳过）。
- * @param win 目标窗口。
+ * 推进度到渲染进程（没给窗口或窗口已销毁时静默跳过）。
+ * @param win 目标窗口；**AI 工具调用传 null**。
  * @param taskId 任务 id。
  * @param percent 百分比。
  * @param outTime 已处理到的时间点秒。
  * @param speed 速度倍率。
  */
 function pushProgress(
-  win: BrowserWindow,
+  win: BrowserWindow | null,
   taskId: string,
   percent: number,
   outTime: number,
   speed: number,
 ): void {
-  if (win.isDestroyed()) return;
+  if (!win || win.isDestroyed()) return;
   win.webContents.send(AUDIO_CHANNELS.progress, { taskId, outTime, percent, speed });
 }
 
@@ -300,13 +300,13 @@ function pushProgress(
  *
  * **一律先写临时文件再 rename**，同 video.ts 的两个理由：ffmpeg 不能读写同一个
  * 文件（覆盖模式必坏），且取消/失败时输出必定是坏文件（来不及写容器索引）。
- * @param win 用于推送进度的窗口。
+ * @param win 用于推送进度的窗口；**AI 工具调用传 null**（那边没有监听进度通道）。
  * @param sourcePath 源文件路径。
  * @param options 转码选项。
  * @returns 转码结果（含取消标记）。
  */
-async function convertOne(
-  win: BrowserWindow,
+export async function convertOne(
+  win: BrowserWindow | null,
   sourcePath: string,
   options: AudioConvertOptions,
 ): Promise<AudioConvertResult> {
