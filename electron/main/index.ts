@@ -13,7 +13,12 @@ import { registerBitmapFontIpc } from './ipc/bitmapFont';
 import { registerExcelIpc } from './ipc/excel';
 import { registerStorageIpc } from './ipc/storage';
 import { registerAiIpc } from './ipc/ai';
+import { registerPetIpc } from './ipc/pet';
+import { registerAppCloseIpc } from './ipc/appClose';
 import { initPanelWindow } from './ai/panelWindow';
+import { initPetWindow, restorePetWindow } from './pet/petWindow';
+import { initAppClose } from './appClose';
+import { initWindowNav } from './windowNav';
 import { registerMediaProtocol, registerMediaScheme } from './protocol/media';
 import { initStoragePaths } from './storage/paths';
 import { registerAppStateSuspender } from './storage/appState';
@@ -59,8 +64,18 @@ function createWindow(): void {
   registerExcelIpc();
   registerStorageIpc();
   registerAiIpc();
+  registerPetIpc();
+  registerAppCloseIpc();
+  // 主窗口的引用两个子窗口都要摸（AI 窗口跳设置页、桌宠把它藏起来再拿回来），存一处
+  initWindowNav(mainWindow);
   // AI 对话是独立窗口：把主窗口交给它当宿主（默认位置 + 设置页跳转 + 跟着一起关）
   initPanelWindow(mainWindow);
+  // 桌宠同理，但它还会把主窗口 hide() 掉——所以主窗口关掉时必须连它一起销毁，
+  // 否则进程里会剩一个 skipTaskbar 的窗口，任务栏上连个能点的图标都没有
+  initPetWindow(mainWindow);
+  // 关闭行为（退出 / 收进托盘 / 每次询问）。**排在 initPetWindow 之后**：两个 close 监听器
+  // 各管自己那一支（桌宠开着时这里直接早退，让桌宠那条 hide() 规则赢），顺序写死好读
+  initAppClose(mainWindow);
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
@@ -90,6 +105,11 @@ app.whenReady().then(async () => {
   ipcMain.handle(APP_CHANNELS.ping, () => 'pong');
 
   createWindow();
+  // 上次退出时停在桌宠模式的话，这次也直接进桌宠。放在 createWindow() 之后：
+  // 它要拿主窗口当默认位置的参照，还要把主窗口 hide() 掉
+  void restorePetWindow().catch((error) => {
+    console.error('[main] 恢复桌宠模式失败，留在主窗口：', error);
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

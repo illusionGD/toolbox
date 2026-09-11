@@ -11,6 +11,7 @@ import {
   FILE_CHANNELS,
   FONT_CHANNELS,
   IMAGE_CHANNELS,
+  PET_CHANNELS,
   STORAGE_CHANNELS,
   VIDEO_CHANNELS,
   WINDOW_CHANNELS,
@@ -63,6 +64,7 @@ import type {
   MigrateResult,
   OpenFilesOptions,
   PickedFile,
+  PetHostTarget,
   QrDecodeResult,
   QrGenerateOptions,
   QrGenerateResult,
@@ -91,6 +93,8 @@ import type {
   VideoProgress,
   WaveformOptions,
 } from '../shared/types';
+import type { PetRect } from '../shared/petWindow';
+import type { AppCloseAction, AppCloseChoice } from '../shared/appWindow';
 
 /** 暴露给渲染进程的自定义 API。 */
 const api = {
@@ -125,6 +129,43 @@ const api = {
       const listener = (_event: unknown, maximized: boolean): void => callback(maximized);
       ipcRenderer.on(WINDOW_CHANNELS.onMaximizeChange, listener);
       return () => ipcRenderer.off(WINDOW_CHANNELS.onMaximizeChange, listener);
+    },
+  },
+
+  /**
+   * 关闭主窗口时的行为（退出 app / 收进托盘 / 每次询问）。
+   *
+   * **和上面的 `window` 组分开**：那三条是裸返回值的老通道，这一组走统一的
+   * `{code,data,message}` 契约，混在一起下次改的人分不清哪条要 `unwrap`。
+   */
+  appWindow: {
+    /**
+     * 改「关闭主窗口时」这个设置。
+     * @param action 三态之一（脏值会在主进程被归一化）。
+     * @returns 统一响应，data 为归一化之后真正生效的动作。
+     */
+    setCloseAction: (action: AppCloseAction): Promise<IpcResponse<AppCloseAction>> =>
+      ipcRenderer.invoke(WINDOW_CHANNELS.setCloseAction, action),
+    /**
+     * 按用户在确认弹窗里点的那一下关。
+     * @param choice 取消 / 退出 / 最小化到托盘。
+     * @param remember 是否把这次的选择记成设置。
+     * @returns 统一响应，data 为是否真做到了（false = 托盘不可用，窗口还在）。
+     */
+    resolveClose: (
+      choice: AppCloseChoice,
+      remember: boolean,
+    ): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(WINDOW_CHANNELS.resolveClose, choice, remember),
+    /**
+     * 订阅「请弹关闭确认弹窗」。
+     * @param callback 收到请求时的回调。
+     * @returns 取消订阅的函数。
+     */
+    onClosePrompt: (callback: () => void): (() => void) => {
+      const listener = (): void => callback();
+      ipcRenderer.on(WINDOW_CHANNELS.closePrompt, listener);
+      return () => ipcRenderer.off(WINDOW_CHANNELS.closePrompt, listener);
     },
   },
 
@@ -789,6 +830,113 @@ const api = {
      */
     saveConversations: (conversations: AiConversation[]): Promise<IpcResponse<number>> =>
       ipcRenderer.invoke(AI_CHANNELS.saveConversations, conversations),
+  },
+
+  /**
+   * 桌宠（独立的无边框透明窗口，开着的时候主窗口是隐藏的）。
+   *
+   * 三处和别的组不一样，各有硬理由：
+   * - `dragStart/dragMove/dragEnd` 是**手写拖拽**（`-webkit-app-region: drag` 分不清
+   *   点击与拖拽，也拿不到「拖拽中 / 放下」两个动画态）；
+   * - `setMenuOpen` 会**临时放大窗口**（菜单不常驻大透明窗口，也不开第三个窗口）；
+   * - `showHost` 是**桌宠模式下回到 app 的唯一路**。
+   */
+  pet: {
+    /**
+     * 打开桌宠：建窗 + 隐藏主窗口。
+     * @returns 统一响应，data 为是否处在桌宠模式。
+     */
+    open: (): Promise<IpcResponse<boolean>> => ipcRenderer.invoke(PET_CHANNELS.open),
+    /**
+     * 退出桌宠模式：显示主窗口 + 销毁桌宠窗口。
+     * @returns 统一响应，data 为是否还在桌宠模式（正常路径是 false）。
+     */
+    close: (): Promise<IpcResponse<boolean>> => ipcRenderer.invoke(PET_CHANNELS.close),
+    /**
+     * 桌宠模式当前开着没有。
+     * @returns 统一响应，data 为是否开着。
+     */
+    isOpen: (): Promise<IpcResponse<boolean>> => ipcRenderer.invoke(PET_CHANNELS.isOpen),
+    /**
+     * 菜单里的「隐藏桌宠」：收进系统托盘，**桌宠模式不退**（位置、大小、动画都留着）。
+     * @returns 统一响应，data 为是否真的藏起来了（托盘建不出来时是 false，见 pet/tray.ts）。
+     */
+    hide: (): Promise<IpcResponse<boolean>> => ipcRenderer.invoke(PET_CHANNELS.hide),
+    /**
+     * 按下：让主进程记下这一刻的窗口矩形，作为整段拖拽的基准。
+     * @returns 统一响应，data 为是否记下了。
+     */
+    dragStart: (): Promise<IpcResponse<boolean>> => ipcRenderer.invoke(PET_CHANNELS.dragStart),
+    /**
+     * 拖拽中：送**相对按下点的累计位移**（不是逐帧增量，见 shared/petWindow.ts）。
+     * @param dx 相对按下点的 x 位移（屏幕坐标，DIP）。
+     * @param dy 相对按下点的 y 位移。
+     * @returns 统一响应，data 为是否移动了。
+     */
+    dragMove: (dx: number, dy: number): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(PET_CHANNELS.dragMove, dx, dy),
+    /**
+     * 松手：清掉基准并落盘一次位置。
+     * @returns 统一响应，data 为是否结束了一段拖拽。
+     */
+    dragEnd: (): Promise<IpcResponse<boolean>> => ipcRenderer.invoke(PET_CHANNELS.dragEnd),
+    /**
+     * 展开 / 收起菜单（主进程把窗口临时放大 / 还原）。
+     * @param open 是否展开。
+     * @returns 统一响应，data 为新的窗口矩形（窗口没开时为 null）。
+     */
+    setMenuOpen: (open: boolean): Promise<IpcResponse<PetRect | null>> =>
+      ipcRenderer.invoke(PET_CHANNELS.setMenuOpen, open),
+    /**
+     * 菜单里的「AI 对话」：开 AI 窗口，**主窗口保持隐藏**。
+     * @returns 统一响应。
+     */
+    openAiWindow: (): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(PET_CHANNELS.openAiWindow),
+    /**
+     * 菜单里的「设置」/「打开 app 界面」：把主窗口拿回来。**桌宠不关**。
+     * @param target 主窗口要停在哪。
+     * @returns 统一响应，data 为是否推给了主窗口。
+     */
+    showHost: (target: PetHostTarget): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(PET_CHANNELS.showHost, target),
+    /**
+     * 菜单里的「退出 app」：整个进程退出。
+     *
+     * **别用 `window.window.close()` 代替它**：那条通道闭包的是主窗口，从桌宠窗口调
+     * 它只是关掉那个已经藏起来的窗口，能退出纯属副作用。
+     * @returns 统一响应。
+     */
+    quitApp: (): Promise<IpcResponse<boolean>> => ipcRenderer.invoke(PET_CHANNELS.quitApp),
+    /**
+     * 设置页保存后调：主进程重设窗口尺寸，并通知桌宠窗口重读配置。
+     * @param size 新的精灵边长。
+     * @returns 统一响应，data 为新的窗口矩形（桌宠没开时为 null）。
+     */
+    applyConfig: (size: number): Promise<IpcResponse<PetRect | null>> =>
+      ipcRenderer.invoke(PET_CHANNELS.configChanged, size),
+    /**
+     * 订阅配置变更（桌宠窗口按它重画自己；**AI 窗口按它重读助手头像**）。
+     * @param callback 回调。
+     * @returns 取消订阅函数。
+     */
+    onConfigChanged: (callback: () => void): (() => void) => {
+      const listener = (): void => callback();
+      ipcRenderer.on(PET_CHANNELS.configChanged, listener);
+      return () => ipcRenderer.off(PET_CHANNELS.configChanged, listener);
+    },
+    /**
+     * 订阅桌宠模式开关变更（**只有主窗口该订**）。
+     *
+     * 首页那个开关不能只按自己点的那下记状态：桌宠被 `Alt+F4` 打中时也会退出桌宠模式。
+     * @param callback 回调，参数为是否处在桌宠模式。
+     * @returns 取消订阅函数。
+     */
+    onStateChanged: (callback: (open: boolean) => void): (() => void) => {
+      const listener = (_e: unknown, open: boolean): void => callback(open);
+      ipcRenderer.on(PET_CHANNELS.stateChanged, listener);
+      return () => ipcRenderer.off(PET_CHANNELS.stateChanged, listener);
+    },
   },
 
   /** 应用状态（主题 / 工具配置 / 使用统计）持久化，落在数据保存目录。 */

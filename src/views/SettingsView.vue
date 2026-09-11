@@ -42,6 +42,31 @@
       </div>
     </n-card>
 
+    <n-card class="settings__section" title="窗口" size="small">
+      <div class="settings__row">
+        <div class="settings__label">
+          <span>关闭主窗口时</span>
+          <span class="settings__hint">
+            转码、压缩这类任务会随退出一起中断；收进托盘可以让它们继续跑完
+          </span>
+        </div>
+        <div class="settings__control">
+          <n-radio-group
+            :value="closeAction"
+            size="small"
+            @update:value="(v: AppCloseAction) => setAction(v)"
+          >
+            <n-space vertical size="small">
+              <n-radio v-for="opt in CLOSE_ACTION_OPTIONS" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+                <span class="settings__hint">—— {{ opt.hint }}</span>
+              </n-radio>
+            </n-space>
+          </n-radio-group>
+        </div>
+      </div>
+    </n-card>
+
     <n-card class="settings__section" title="存储" size="small">
       <n-alert
         v-if="stateDegraded.degraded"
@@ -154,6 +179,9 @@
 
     <!-- AI 配置另立组件：本视图已经不短，且 AI 那块本身还会继续长 -->
     <AiSettingsCard />
+
+    <!-- 桌宠同理：它自己也会继续长（spine / live2d / 桌宠 AI 都还没接） -->
+    <PetSettingsCard />
   </div>
 </template>
 
@@ -166,12 +194,17 @@ import {
   NColorPicker,
   NDivider,
   NPopconfirm,
+  NRadio,
+  NRadioGroup,
   NSpace,
   useMessage,
 } from 'naive-ui';
 import type { AppPathsInfo, DirUsage, StorageDirKind } from '@shared/types';
+import type { AppCloseAction } from '@shared/appWindow';
 import AiSettingsCard from '@/components/ai/AiSettingsCard.vue';
+import PetSettingsCard from '@/components/pet/PetSettingsCard.vue';
 import { useThemeStore } from '@/stores/theme';
+import { useCloseAction } from '@/composables/useCloseAction';
 import { THEME_PRESETS } from '@/constants/theme';
 import { formatBytes } from '@/utils/format';
 import { pickDirectoryApi } from '@/services/fs';
@@ -189,6 +222,19 @@ import { appStateStatus, flushAppState } from '@/services/appState';
 // #region setup
 const themeStore = useThemeStore();
 const message = useMessage();
+const { action: closeAction, setAction } = useCloseAction();
+
+/**
+ * 「关闭主窗口时」的三个选项。
+ *
+ * 按 `AppCloseAction` 联合类型标注：漏一项 / 打错字，typecheck 就红（桩测还会另外断言
+ * 这里的项数等于 `APP_CLOSE_ACTIONS.length` —— 少一项意味着有个状态用户根本设不到）。
+ */
+const CLOSE_ACTION_OPTIONS: { value: AppCloseAction; label: string; hint: string }[] = [
+  { value: 'ask', label: '每次询问', hint: '弹一个确认框，可以当场选' },
+  { value: 'quit', label: '退出 app', hint: '直接退出，进行中的任务会中断' },
+  { value: 'tray', label: '最小化到托盘', hint: '窗口收起来，任务继续跑，点托盘图标回来' },
+];
 
 const paths = ref<AppPathsInfo | null>(null);
 const cacheUsage = ref<DirUsage>({ bytes: 0, files: 0 });

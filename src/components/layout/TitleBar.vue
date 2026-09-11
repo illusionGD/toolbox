@@ -1,10 +1,24 @@
 <template>
   <header class="title-bar">
     <div class="title-bar__left">
-      <n-icon :size="22" :color="themeStore.primaryColor">
-        <CubeOutline />
-      </n-icon>
-      <span class="title-bar__brand">Toolbox</span>
+      <button
+        v-if="can('desktop-pet')"
+        class="title-bar__logo"
+        type="button"
+        :title="petOpen ? '退出桌宠' : '调出桌宠（主窗口会收起来）'"
+        @click="togglePet()"
+      >
+        <n-icon :size="22" :color="themeStore.primaryColor">
+          <CubeOutline />
+        </n-icon>
+        <span class="title-bar__brand">Toolbox</span>
+      </button>
+      <template v-else>
+        <n-icon :size="22" :color="themeStore.primaryColor">
+          <CubeOutline />
+        </n-icon>
+        <span class="title-bar__brand">Toolbox</span>
+      </template>
     </div>
 
     <div class="title-bar__center">
@@ -57,7 +71,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+/**
+ * 主窗口标题栏：logo（**兼桌宠开关**）+ 搜索 + 账号 + 三个窗口控制键。
+ *
+ * **logo 是桌宠入口**（review 定的，原话「桌宠按钮放在顶部 logo 处，点击 logo 调出桌宠」）。
+ * 它原来在首页当一块卡片，但那块地方只有首页有——桌宠是全局的东西，挂在标题栏才随处点得到。
+ * 两处必须注意：整条标题栏是 `-webkit-app-region: drag` 的，能点的东西必须自己声明
+ * `no-drag`；`can('desktop-pet')` 关掉时**退回纯展示的 logo**，而不是留一个点不动的按钮。
+ */
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { NIcon, NInput } from 'naive-ui';
 import {
   CloseOutline,
@@ -70,6 +92,8 @@ import {
 import { useThemeStore } from '@/stores/theme';
 import { useWindowControls } from '@/composables/useWindowControls';
 import { useToolLauncher } from '@/composables/useToolLauncher';
+import { useEntitlement } from '@/composables/useEntitlement';
+import { closePetApi, isPetOpenApi, openPetApi } from '@/services/pet';
 import { TOOL_MAP, type FlatTool } from '@/utils/navigation';
 import AccountEntry from './AccountEntry.vue';
 
@@ -77,6 +101,7 @@ import AccountEntry from './AccountEntry.vue';
 const themeStore = useThemeStore();
 const { isMaximized, minimize, toggleMaximize, close } = useWindowControls();
 const { openTool } = useToolLauncher();
+const { can } = useEntitlement();
 
 /** 最小化窗口。 */
 function handleMinimize(): void {
@@ -92,6 +117,39 @@ function handleToggleMaximize(): void {
 function handleClose(): void {
   close();
 }
+// #endregion
+
+// #region pet
+/**
+ * 桌宠模式当前开着没有。
+ *
+ * 不能只按自己点的那一下记状态：桌宠窗口被 `Alt+F4` 打中、或桌宠菜单里点了「退出桌宠」，
+ * 都会退出桌宠模式，所以要订主进程的广播。
+ */
+const petOpen = ref(false);
+/** 取消订阅桌宠开关广播。 */
+let offPetState: (() => void) | null = null;
+
+/** 切换桌宠模式。开桌宠会把这个窗口整个隐藏掉，所以不用等返回值刷新界面。 */
+async function togglePet(): Promise<void> {
+  petOpen.value = petOpen.value ? await closePetApi() : await openPetApi();
+}
+
+onMounted(() => {
+  offPetState = window.api.pet.onStateChanged((open) => {
+    petOpen.value = open;
+  });
+  // 桌宠模式下主窗口只是 hide 着，回来时这个组件不会重新挂载；但启动恢复那条路
+  // （restorePetWindow）会先建主窗口再开桌宠，所以挂载时仍要对齐一次真实状态
+  void isPetOpenApi().then((open) => {
+    petOpen.value = open;
+  });
+});
+
+onUnmounted(() => {
+  offPetState?.();
+  offPetState = null;
+});
 // #endregion
 
 // #region search
@@ -184,6 +242,25 @@ watch(searchKeyword, () => {
     align-items: center;
     gap: var(--tb-space-2);
     width: 200px;
+  }
+
+  // logo 兼桌宠开关。整条标题栏是 drag 区，能点的东西必须自己声明 no-drag
+  &__logo {
+    display: flex;
+    align-items: center;
+    gap: var(--tb-space-2);
+    padding: var(--tb-space-1) var(--tb-space-2);
+    margin-left: calc(var(--tb-space-2) * -1);
+    border: none;
+    border-radius: var(--tb-radius-sm);
+    background: transparent;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    transition: background 0.15s;
+
+    &:hover {
+      background: var(--tb-bg-hover);
+    }
   }
 
   &__brand {

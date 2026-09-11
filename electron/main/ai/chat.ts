@@ -24,6 +24,7 @@ import type {
 } from '../../shared/types';
 import { createModel } from './provider';
 import { describeAiError, isAbortError } from './errors';
+import { buildSystemPrompt, TEST_CONNECTION_PROMPT } from '../../shared/prompts';
 import { buildTools, denyPending, killTasks, trackTask } from './tools';
 
 /**
@@ -250,10 +251,13 @@ export async function runChat(
       trackTask: (taskId) => trackTask(request.requestId, taskId),
     });
 
+    const systemPrompt = buildSystemPrompt(config.systemPrompt);
+
     const result = streamText({
       model,
-      // 留空就不下发 system：有些兼容端点对空字符串的 system 报 400
-      ...(config.systemPrompt.trim() ? { system: config.systemPrompt.trim() } : {}),
+      // 留空就不下发 system（有些兼容端点对空字符串的 system 报 400）——规则见
+      // `buildSystemPrompt`：空 = 没有 system，不是空 system
+      ...(systemPrompt !== undefined ? { system: systemPrompt } : {}),
       messages,
       abortSignal: controller.signal,
       maxRetries: MAX_RETRIES,
@@ -370,7 +374,7 @@ export async function testConnection(
       {
         requestId,
         config,
-        messages: [{ role: 'user', text: '你好，请只回复「连接正常」四个字。' }],
+        messages: [{ role: 'user', text: TEST_CONNECTION_PROMPT }],
         // 「测试连接」不该带上十几个工具声明：既费 token，又可能因为端点不吃 tools
         // 而把一次本来能通的连接测成失败
         toolMode: 'off',

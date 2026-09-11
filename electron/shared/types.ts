@@ -1,6 +1,9 @@
 /**
  * 主进程与渲染进程共享的 IPC 数据类型。
  */
+// 关闭动作的**行为**（白名单 + 归一化）在 shared/appWindow.ts 里，那边是桩测直接断言的
+// 纯模块；这里只借它的类型，好让 AppWindowState 和另外两个 *WindowState 排在一起
+import type { AppCloseAction } from './appWindow';
 
 /** IPC 统一返回码。0 成功，非 0 为各类错误。 */
 export const IPC_CODE = {
@@ -1715,6 +1718,43 @@ export interface AiWindowState {
   bounds?: { x: number; y: number; width: number; height: number };
   /** 是否置顶（盖住其他程序）。 */
   alwaysOnTop?: boolean;
+}
+
+/**
+ * 桌宠窗口自己的状态，存在**独立的 `petWindow` 命名空间**里。
+ *
+ * 和 {@link AiWindowState} 分家的理由一模一样：桌宠的配置（资源、动画映射、大小）在
+ * `pet` 命名空间由渲染进程 store **整块覆盖写**，而这里两个字段是**主进程**写的
+ * （拖完窗口写 bounds、开关桌宠写 enabled），混在一个命名空间里必然互相抹掉。
+ */
+export interface PetWindowState {
+  /**
+   * 上次的窗口矩形（屏幕坐标，DIP）。没存过时不给默认值——由主进程按当前显示器的
+   * 右下角现算，读出来也一定要夹回当前工作区（拔掉外接屏后否则就开在看不见的地方）。
+   */
+  bounds?: { x: number; y: number; width: number; height: number };
+  /**
+   * 上次退出时是不是停在桌宠模式。
+   *
+   * 存这里而不是 `pet` 里，因为**改它的是主进程**（开桌宠、关桌宠、启动时恢复）。
+   */
+  enabled?: boolean;
+}
+
+/** 桌宠菜单里三个按钮要把主窗口带到哪。 */
+export type PetHostTarget = 'app' | 'settings';
+
+/**
+ * 主窗口自己的状态，存在**独立的 `appWindow` 命名空间**里。
+ *
+ * 命名空间的单写方规则同 {@link AiWindowState} / {@link PetWindowState}，但方向反了过来：
+ * **这个命名空间只有主进程写**（`close` 处理器要在同步段就知道该干什么，所以它在主进程
+ * 里有一份缓存，改动一律经 `window:setCloseAction` 落到主进程再落盘）。**渲染进程只
+ * `readState` 读，永远不 `writeState`**——它一整块覆盖回去就会把主进程刚写的抹掉。
+ */
+export interface AppWindowState {
+  /** 关闭主窗口时的动作；没存过时按 `APP_CLOSE_ACTION_DEFAULT`（每次询问）。 */
+  closeAction?: AppCloseAction;
 }
 
 /**

@@ -21,6 +21,41 @@ import {
   defaultPanelBounds,
   parsePanelBounds,
 } from '../../electron/shared/aiPanel';
+import {
+  PET_EDGE_GAP,
+  PET_MENU_CHROME,
+  PET_MENU_HEIGHT,
+  PET_MENU_ITEM_COUNT,
+  PET_MENU_ITEM_HEIGHT,
+  PET_MENU_SIZE_ROW,
+  PET_MENU_WIDTH,
+  PET_SIZE_MAX,
+  PET_SIZE_MIN,
+  PET_TOPMOST_REASSERT_MS,
+  PET_VISIBLE,
+  clampPetBounds,
+  clampPetSize,
+  defaultPetBounds,
+  dragPetBounds,
+  parsePetBounds,
+  petMenuBounds,
+  petWindowSize,
+} from '../../electron/shared/petWindow';
+import {
+  PET_MS_MAX,
+  PET_MS_MIN,
+  type PetConfig,
+  type PetState,
+  nextIdleLoopIndex,
+  nextPetState,
+  normalizePetConfig,
+  resolvePetVisual,
+} from '../../electron/shared/pet';
+import {
+  APP_CLOSE_ACTIONS,
+  APP_CLOSE_ACTION_DEFAULT,
+  normalizeCloseAction,
+} from '../../electron/shared/appWindow';
 import { cancelChat, describeWarning, runChat } from '../../electron/main/ai/chat';
 import {
   buildTools,
@@ -886,6 +921,735 @@ eq(
     'AI 窗口被关掉 → 等着的确认判成拒绝（否则 execute 里那个 await 再没人能兑现）',
   );
   await settledWithin(inflight);
+}
+
+/* ============================ #26a 桌宠：几何 ============================ */
+
+{
+  const workArea = { x: 0, y: 0, width: 1920, height: 1040 };
+
+  // 需求 1「右下角出现桌宠」：贴右下且留 PET_EDGE_GAP
+  const home = defaultPetBounds(workArea, 160);
+  deepEq(home, { x: 1744, y: 864, width: 160, height: 160 }, '默认位置贴工作区右下角');
+  eq(
+    workArea.x + workArea.width - (home.x + home.width),
+    PET_EDGE_GAP,
+    '右边距恰好是 PET_EDGE_GAP',
+  );
+  eq(
+    workArea.y + workArea.height - (home.y + home.height),
+    PET_EDGE_GAP,
+    '下边距恰好是 PET_EDGE_GAP',
+  );
+
+  // 副屏（负坐标）也要贴那块屏自己的右下角，不是主屏的
+  const leftScreen = { x: -1920, y: 0, width: 1920, height: 1040 };
+  deepEq(
+    defaultPetBounds(leftScreen, 160),
+    { x: -176, y: 864, width: 160, height: 160 },
+    '负坐标副屏上的默认位置按那块屏算',
+  );
+
+  eq(clampPetSize(10), PET_SIZE_MIN, '尺寸下越界夹到 PET_SIZE_MIN');
+  eq(clampPetSize(9999), PET_SIZE_MAX, '尺寸上越界夹到 PET_SIZE_MAX');
+  eq(clampPetSize('160' as unknown), 160, '尺寸是字符串 → 回默认值而不是 NaN');
+  eq(clampPetSize(Number.NaN), 160, 'NaN 尺寸 → 回默认值');
+  eq(clampPetSize(160.4), 160, '小数尺寸取整');
+
+  // PET_VISIBLE：桌宠没有任务栏图标，整块拖出屏幕就再也点不到
+  const outRight = clampPetBounds({ x: 99999, y: 500, width: 160, height: 160 }, workArea);
+  eq(outRight.x, workArea.x + workArea.width - PET_VISIBLE, '右侧至少留 PET_VISIBLE 在屏内');
+  const outLeft = clampPetBounds({ x: -99999, y: 500, width: 160, height: 160 }, workArea);
+  eq(outLeft.x, workArea.x + PET_VISIBLE - 160, '左侧至少留 PET_VISIBLE 在屏内');
+  const outBottom = clampPetBounds({ x: 500, y: 99999, width: 160, height: 160 }, workArea);
+  eq(
+    outBottom.y,
+    workArea.y + workArea.height - PET_VISIBLE,
+    '下方至少留 PET_VISIBLE 在屏内（这条漏了桌宠就永远拖不回来）',
+  );
+  const outTop = clampPetBounds({ x: 500, y: -99999, width: 160, height: 160 }, workArea);
+  eq(outTop.y, workArea.y + PET_VISIBLE - 160, '上方至少留 PET_VISIBLE 在屏内');
+
+  // 尺寸原样带过：菜单展开时窗口比精灵大，夹尺寸会把菜单裁掉
+  const wide = clampPetBounds({ x: 100, y: 100, width: 308, height: 160 }, workArea);
+  eq(wide.width, 308, 'clampPetBounds 不改宽（菜单展开时窗口比精灵宽）');
+  eq(wide.height, 160, 'clampPetBounds 不改高');
+
+  // 显示器被拔掉：存的位置来自一块已经不在的屏，要能拉回当前工作区
+  const backFromUnplugged = clampPetBounds(
+    { x: -3000, y: -2000, width: 160, height: 160 },
+    workArea,
+  );
+  eq(
+    backFromUnplugged.x >= workArea.x + PET_VISIBLE - 160 &&
+      backFromUnplugged.x <= workArea.x + workArea.width - PET_VISIBLE,
+    true,
+    '旧屏坐标被拉回当前工作区（x）',
+  );
+  eq(
+    backFromUnplugged.y >= workArea.y + PET_VISIBLE - 160 &&
+      backFromUnplugged.y <= workArea.y + workArea.height - PET_VISIBLE,
+    true,
+    '旧屏坐标被拉回当前工作区（y）',
+  );
+
+  // 拖拽：绝对计算（起始 bounds + 累计位移），不许增量累加
+  const start = { x: 500, y: 500, width: 160, height: 160 };
+  deepEq(
+    dragPetBounds(start, 77, 55, workArea),
+    { x: 577, y: 555, width: 160, height: 160 },
+    '拖拽落点 = 起始 + 位移',
+  );
+  const once = dragPetBounds(start, 77, 55, workArea);
+  const twice = dragPetBounds(start, 77, 55, workArea);
+  const thrice = dragPetBounds(start, 77, 55, workArea);
+  deepEq(
+    [once, twice, thrice].map((r) => `${r.x},${r.y}`).join('|'),
+    '577,555|577,555|577,555',
+    '同一组 (start,dx,dy) 反复算结果恒等（守「绝不增量累加」——setPosition 会回灌 move 事件）',
+  );
+  deepEq(
+    dragPetBounds(start, Number.NaN, 10, workArea),
+    { x: 500, y: 510, width: 160, height: 160 },
+    'NaN 位移当 0，不把窗口位置污染成 NaN',
+  );
+  eq(
+    dragPetBounds(start, 99999, 0, workArea).x,
+    workArea.x + workArea.width - PET_VISIBLE,
+    '拖出屏幕时落点仍被夹住',
+  );
+
+  // 菜单展开：窗口向左上长，精灵在屏幕上一动不动
+  const pet = { x: 1744, y: 864, width: 160, height: 160 };
+  const opened = petMenuBounds(pet, 160, true, workArea);
+  const closed = petMenuBounds(opened, 160, false, workArea);
+  eq(opened.x + opened.width, pet.x + pet.width, '菜单展开后右边缘不动（精灵锚在窗口右下角）');
+  eq(opened.y + opened.height, pet.y + pet.height, '菜单展开后下边缘不动');
+  eq(opened.width, 160 + PET_MENU_WIDTH, '展开后窗口宽 = 精灵 + 菜单宽');
+  deepEq(closed, pet, '收起后逐字回到精灵矩形');
+  eq(petMenuBounds(pet, 160, true, workArea).x < pet.x, true, '窗口向左生长（向右会长到屏幕外）');
+
+  // review 往菜单里加了「退出桌宠 / 退出 app」两项、又加了一整块「实时调大小」之后，
+  // 高度不再是随便一个常数：算少了会把最下面那项（也就是「退出 app」）裁在窗口边缘外
+  eq(
+    PET_MENU_HEIGHT >= PET_MENU_ITEM_COUNT * PET_MENU_ITEM_HEIGHT + PET_MENU_SIZE_ROW + 42,
+    true,
+    '菜单区高度装得下全部菜单项 + 大小那一块 + 容器余量（算少了最下面那项会被窗口边缘裁掉）',
+  );
+  // 大小块：标题行 16 + 间距 4 + 滑块与输入框那行 26 = 46，量的是 PetMenu.vue 的实际样式。
+  // 它**不并进项数**，否则下面那条源码金丝雀（数 ITEMS 有几项）就永远对不上
+  eq(PET_MENU_SIZE_ROW >= 46, true, '大小那一块的高装得下标题行与滑块行');
+  // 42 = 容器内边距 8 + 边框 2 + 八个子元素间的 7 道 2px 间距 14 + **两条**分隔线
+  // （各是 1 + 上下 4 = 9）18。低于这个数就等于「按项数算」也还是不够高
+  eq(PET_MENU_CHROME >= 42, true, '容器余量覆盖内边距 + 边框 + 项间距 + 两条分隔线');
+  // 精灵比菜单矮的情形（64px 的小桌宠 + 5 项菜单）：高度由菜单决定，
+  // 而「精灵在屏幕上一动不动」这条**仍然**要成立——这时窗口是向上长的
+  const small = { x: 1840, y: 960, width: 64, height: 64 };
+  const smallOpen = petMenuBounds(small, 64, true, workArea);
+  eq(smallOpen.height, PET_MENU_HEIGHT, '精灵比菜单矮时窗口高按菜单算');
+  eq(smallOpen.x + smallOpen.width, small.x + small.width, '小精灵展开后右边缘不动');
+  eq(smallOpen.y + smallOpen.height, small.y + small.height, '小精灵展开后下边缘不动');
+  deepEq(petMenuBounds(smallOpen, 64, false, workArea), small, '小精灵收起后逐字回到精灵矩形');
+
+  // petWindowSize：窗口该多大的**唯一**公式。抽出来是因为主进程不能信 getBounds() 的
+  // 宽高——探针在本机 scaleFactor=1.25 下量到它会回 161 而不是 160
+  deepEq(petWindowSize(160, false), { width: 160, height: 160 }, '收起态窗口就是精灵那么大');
+  deepEq(
+    petWindowSize(160, true),
+    { width: 160 + PET_MENU_WIDTH, height: PET_MENU_HEIGHT },
+    '展开态 = 精灵 + 菜单宽，高按菜单算',
+  );
+  eq(petWindowSize(512, true).height, 512, '精灵比菜单高时窗口高按精灵算');
+  deepEq(petWindowSize(9999, false), { width: 512, height: 512 }, '越界尺寸先被夹进合法区间');
+  // petMenuBounds 必须**用**这个公式而不是自己再算一遍，否则两处会各自漂移
+  const sizeMatch = petMenuBounds(pet, 160, true, workArea);
+  deepEq(
+    { width: sizeMatch.width, height: sizeMatch.height },
+    petWindowSize(160, true),
+    'petMenuBounds 的宽高与 petWindowSize 逐字一致（同一个公式，不许各算各的）',
+  );
+
+  // 存盘值解析
+  eq(parsePetBounds(undefined), undefined, 'undefined 不是合法 bounds');
+  eq(parsePetBounds(null), undefined, 'null 不是合法 bounds');
+  eq(parsePetBounds('160,160'), undefined, '字符串不是合法 bounds');
+  eq(
+    parsePetBounds({ x: Number.NaN, y: 0, width: 160, height: 160 }),
+    undefined,
+    'NaN 一律拒掉（setBounds 收到 NaN 会抛，窗口开不出来）',
+  );
+  eq(
+    parsePetBounds({ x: 0, y: 0, width: Number.POSITIVE_INFINITY, height: 160 }),
+    undefined,
+    'Infinity 一律拒掉',
+  );
+  eq(parsePetBounds({ x: 1, y: 2, width: 3 }), undefined, '缺字段一律拒掉');
+  deepEq(
+    parsePetBounds({ x: 1, y: 2, width: 3, height: 4, junk: 'x' }),
+    { x: 1, y: 2, width: 3, height: 4 },
+    '合法值只取四个字段（多余的键不带进窗口选项）',
+  );
+}
+
+/* ================= #26a 桌宠：状态映射（需求 3 的兜底） ================= */
+
+{
+  const base = normalizePetConfig({ defaultRef: 'default.png' });
+  const allStates: PetState[] = ['idle', 'click', 'drag', 'drop', 'idleLoop'];
+
+  // 全不配 → 五个状态全部回落到 defaultRef（用户原话「没配置的状态同一默认」）
+  for (const state of allStates) {
+    eq(resolvePetVisual(base, state), 'default.png', `没配 ${state} → 回落到默认资源`);
+  }
+
+  // defaultRef 也空 → 全部 null（调用方用 logo，需求 4）
+  const empty = normalizePetConfig({});
+  for (const state of allStates) {
+    eq(resolvePetVisual(empty, state), null, `${state} 无配置且无默认 → null（调用方用 logo）`);
+  }
+
+  // 全配 → 各返回自己那条
+  const full = normalizePetConfig({
+    defaultRef: 'def.png',
+    states: {
+      idle: 'idle.png',
+      click: 'click.png',
+      drag: 'drag.png',
+      drop: 'drop.png',
+      idleLoop: ['a.png', 'b.png', 'c.png'],
+    },
+  });
+  eq(resolvePetVisual(full, 'idle'), 'idle.png', '配了 idle 用 idle');
+  eq(resolvePetVisual(full, 'click'), 'click.png', '配了 click 用 click');
+  eq(resolvePetVisual(full, 'drag'), 'drag.png', '配了 drag 用 drag');
+  eq(resolvePetVisual(full, 'drop'), 'drop.png', '配了 drop 用 drop');
+
+  // 只配一个状态：其余四个仍回落
+  const onlyClick = normalizePetConfig({ defaultRef: 'def.png', states: { click: 'click.png' } });
+  eq(resolvePetVisual(onlyClick, 'click'), 'click.png', '只配 click：click 用自己的');
+  for (const state of ['idle', 'drag', 'drop', 'idleLoop'] as PetState[]) {
+    eq(resolvePetVisual(onlyClick, state), 'def.png', `只配 click：${state} 回落到默认`);
+  }
+
+  // 待机轮播：N 种依次轮播且到头绕回
+  eq(resolvePetVisual(full, 'idleLoop', 0), 'a.png', '轮播下标 0');
+  eq(resolvePetVisual(full, 'idleLoop', 1), 'b.png', '轮播下标 1');
+  eq(resolvePetVisual(full, 'idleLoop', 2), 'c.png', '轮播下标 2');
+  eq(resolvePetVisual(full, 'idleLoop', 3), 'a.png', '轮播下标越界后绕回 0');
+  eq(
+    [0, 1, 2, 3, 4].map((i) => nextIdleLoopIndex(i, 3)).join(','),
+    '1,2,0,1,2',
+    'nextIdleLoopIndex 在 3 条时的环绕序列',
+  );
+  eq(nextIdleLoopIndex(0, 1), 0, '只有一条轮播时下标恒为 0');
+  eq(nextIdleLoopIndex(0, 0), 0, '零条轮播不除以 0');
+  eq(nextIdleLoopIndex(Number.NaN, 3), 0, 'NaN 下标回 0');
+
+  // 轮播为空 → 回落而不是空串（空串会让 <img src=""> 去请求当前页面）
+  const noLoop = normalizePetConfig({ defaultRef: 'def.png', states: { idleLoop: [] } });
+  eq(resolvePetVisual(noLoop, 'idleLoop'), 'def.png', '轮播为空数组 → 回落到默认，不是空串');
+  eq(resolvePetVisual(noLoop, 'idleLoop', 5), 'def.png', '轮播为空时下标越界也不抛');
+}
+
+/* ================= #26a 桌宠：状态机 ================= */
+
+{
+  const cfg = normalizePetConfig({
+    idleAfterMs: 15000,
+    transientMs: 800,
+    idleLoopMs: 3000,
+  });
+
+  eq(nextPetState('idle', 'click', cfg).state, 'click', 'idle --click--> click');
+  eq(nextPetState('idle', 'click', cfg).holdMs, 800, 'click 态存活 transientMs');
+  eq(nextPetState('click', 'timeout', cfg).state, 'idle', 'click --timeout--> idle');
+  eq(nextPetState('idle', 'dragStart', cfg).state, 'drag', 'idle --dragStart--> drag');
+  eq(nextPetState('idle', 'dragStart', cfg).holdMs, null, 'drag 态不自动离开（等松手）');
+  eq(nextPetState('drag', 'dragEnd', cfg).state, 'drop', 'drag --dragEnd--> drop');
+  eq(nextPetState('drag', 'dragEnd', cfg).holdMs, 800, 'drop 态存活 transientMs');
+  eq(nextPetState('drop', 'timeout', cfg).state, 'idle', 'drop --timeout--> idle');
+  eq(nextPetState('idle', 'timeout', cfg).holdMs, 15000, 'idle 的 holdMs 是「静置多久进轮播」');
+
+  // 拖着的时候不许自己开始待机轮播
+  eq(
+    nextPetState('drag', 'idleTick', cfg).state,
+    'drag',
+    'drag 态下 idleTick 不改状态（手正拖着它）',
+  );
+  // 任何交互都立刻打断轮播
+  eq(nextPetState('idleLoop', 'click', cfg).state, 'click', 'idleLoop 被 click 打断');
+  eq(nextPetState('idleLoop', 'dragStart', cfg).state, 'drag', 'idleLoop 被 dragStart 打断');
+  eq(nextPetState('idle', 'idleTick', cfg).state, 'idleLoop', 'idle 静置到点进轮播');
+  eq(nextPetState('idleLoop', 'idleTick', cfg).state, 'idleLoop', '轮播中的 idleTick 换下一张');
+  eq(nextPetState('idleLoop', 'idleTick', cfg).holdMs, 3000, '轮播每张停留 idleLoopMs');
+  // 没在拖也收到 dragEnd（pointercancel）时不该凭空冒出一个 drop
+  eq(nextPetState('idle', 'dragEnd', cfg).state, 'idle', '没在拖时的 dragEnd 不凭空产生 drop 动画');
+  eq(nextPetState('drag', 'click', cfg).state, 'drag', 'drag 中收到 click 也不打断拖拽');
+}
+
+/* ================= #26a 桌宠：normalizePetConfig 的健壮性 ================= */
+
+{
+  // app-state.json 是用户改得到的纯文本，手改坏一个字段不该让桌宠开不出来
+  const dirty: unknown[] = [
+    undefined,
+    null,
+    {},
+    [],
+    'nonsense',
+    42,
+    { kind: 'nope', size: 'big', states: [1, 2, 3], defaultRef: 123 },
+    { states: { idle: 42, idleLoop: 'not-an-array' } },
+    { states: { idleLoop: ['a.png', '', '   ', 'b.png'] } },
+    { idleAfterMs: Number.NaN, transientMs: -5, idleLoopMs: 1e12 },
+  ];
+  for (const value of dirty) {
+    let config: PetConfig | null = null;
+    let threw = false;
+    try {
+      config = normalizePetConfig(value);
+    } catch {
+      threw = true;
+    }
+    eq(threw, false, `normalizePetConfig(${JSON.stringify(value)}) 不抛`);
+    if (!config) continue;
+    eq(
+      typeof config.kind === 'string' && typeof config.defaultRef === 'string',
+      true,
+      `normalizePetConfig(${JSON.stringify(value)}) 的字段类型正确`,
+    );
+    eq(
+      Number.isFinite(config.size) &&
+        Number.isFinite(config.idleAfterMs) &&
+        Number.isFinite(config.transientMs) &&
+        Number.isFinite(config.idleLoopMs),
+      true,
+      `normalizePetConfig(${JSON.stringify(value)}) 的四个数字都是有限数`,
+    );
+    // 纯对象的判据：本仓库因为 Vue 响应式代理踩过五次「An object could not be cloned」
+    let cloneOk = true;
+    try {
+      structuredClone(config);
+    } catch {
+      cloneOk = false;
+    }
+    eq(cloneOk, true, `normalizePetConfig(${JSON.stringify(value)}) 的结果可 structuredClone`);
+  }
+
+  const cleaned = normalizePetConfig({ states: { idleLoop: ['a.png', '', '  ', 'b.png'] } });
+  deepEq(cleaned.states.idleLoop, ['a.png', 'b.png'], '轮播里的空串被剔掉，不产生空 <img src>');
+  eq(normalizePetConfig({ idleAfterMs: -5 }).idleAfterMs, PET_MS_MIN, '负时长夹到下限');
+  eq(normalizePetConfig({ idleLoopMs: 1e12 }).idleLoopMs, PET_MS_MAX, '超大时长夹到上限');
+  eq(normalizePetConfig({ kind: 'spine' }).kind, 'spine', '认得的 kind 保留（26b 要用）');
+  eq(normalizePetConfig({ kind: 'nope' }).kind, 'image', '认不得的 kind 回落到 image');
+  eq(
+    normalizePetConfig({ defaultRef: '  C:/pet/idle.png  ' }).defaultRef,
+    'C:/pet/idle.png',
+    'defaultRef 去首尾空白',
+  );
+  eq(
+    normalizePetConfig({ states: { idle: '   ' } }).states.idle,
+    undefined,
+    '纯空白的状态映射当没配（否则会被当成一条真配置，兜底就失效了）',
+  );
+
+  // AI 头像（review 加的）：默认空串 = 用应用 logo，和桌宠自己的资源是两张图
+  eq(normalizePetConfig({}).aiAvatarRef, '', '没配 AI 头像时是空串（= 用应用 logo）');
+  eq(
+    normalizePetConfig({ aiAvatarRef: '  C:/pet/face.png  ' }).aiAvatarRef,
+    'C:/pet/face.png',
+    'AI 头像路径去首尾空白',
+  );
+  eq(
+    normalizePetConfig({ aiAvatarRef: 42 as unknown }).aiAvatarRef,
+    '',
+    '类型不对的 AI 头像当没配（而不是让 <img src> 吃到一个数字）',
+  );
+  eq(
+    normalizePetConfig({ aiAvatarRef: 'face.png' }).defaultRef,
+    '',
+    '配了 AI 头像不会连带把桌宠默认资源也设上（两者刻意分开）',
+  );
+  eq(
+    normalizePetConfig({ defaultRef: 'pet.png' }).aiAvatarRef,
+    '',
+    '配了桌宠资源也不会顺手把 AI 头像设成同一张',
+  );
+}
+
+/* ======== #26 桌宠：菜单项数与窗口高度必须同步（review 加两项后的守卫） ======== */
+
+{
+  // 这条是**源码级的哨兵**：菜单有几项住在 .vue 里，窗口要放大到多高住在 shared/ 里，
+  // 两边对不上时最下面那项会被窗口边缘裁掉，而**跑起来才看得见**（还得刚好翻到最后一项）。
+  // 代价是它认字符串，所以只认「ITEMS 数组里有几个 key:」这一件事，别往里加别的模式匹配。
+  const source = await readFile('src/components/pet/PetMenu.vue', 'utf-8');
+  const block = /const ITEMS[^=]*= \[([\s\S]*?)\];/.exec(source)?.[1] ?? '';
+  eq(block.length > 0, true, 'PetMenu.vue 里找得到 ITEMS 数组（找不到说明结构变了，哨兵要跟着改）');
+  eq(
+    (block.match(/\bkey:/g) ?? []).length,
+    PET_MENU_ITEM_COUNT,
+    'PetMenu.vue 的菜单项数与 PET_MENU_ITEM_COUNT 一致（对不上会裁掉最下面那项）',
+  );
+  // 两个出口是 review 明确要的（原先菜单里一个出口都没有）
+  eq(source.includes('closePetApi'), true, '菜单里有「退出桌宠」这条出口');
+  eq(source.includes('petQuitAppApi'), true, '菜单里有「退出 app」这条出口');
+  // 「实时调节大小的拖拽 + input 框」也是 review 明确要的。少了它 PET_MENU_SIZE_ROW
+  // 那 46px 就变成菜单顶上一块白留的空
+  eq(source.includes('n-slider'), true, '菜单里有调大小的滑块');
+  eq(source.includes('n-input-number'), true, '菜单里有调大小的输入框');
+  eq(source.includes('store.setSize('), true, '滑块与输入框接的是 usePetStore().setSize');
+  // review 第三轮：「布局应该在 input 下面」。**只在 <template> 里比先后**——文件头注释
+  // 里也讲了这个排版，拿整份文件去 indexOf 会命中注释（它恒在两个标签之上），顺序反过来
+  // 也照样绿，那正是本功能已经栽过两次的坏金丝雀写法
+  const tpl = /<template>([\s\S]*?)<\/template>/.exec(source)?.[1] ?? '';
+  eq(tpl.length > 0, true, 'PetMenu.vue 里找得到 <template>（找不到说明结构变了，哨兵要跟着改）');
+  const inputAt = tpl.indexOf('<n-input-number');
+  const sliderAt = tpl.indexOf('<n-slider');
+  eq(
+    inputAt >= 0 && sliderAt >= 0 && inputAt < sliderAt,
+    true,
+    '输入框排在滑块之前（滑块单独占下面一整行，挤回同一行就只剩一百来像素可拖）',
+  );
+}
+
+/* ======== #26 桌宠：三条只在运行时才看得见的顺序 / 样式约定（review 修 bug 后加的） ======== */
+
+{
+  // 1. **落盘必须排在广播之前。** writeState 是 300ms 防抖的，不 flush 就广播，
+  //    收到广播的窗口 refreshAppState() 读回来的是**上一版**配置——表现就是 review 报的
+  //    「桌宠图片每次都停留在上一次更新」。没有任何报错，类型系统也拦不住，只有顺序防得住。
+  const store = await readFile('src/stores/pet.ts', 'utf-8');
+  // 只在 persist() 那一段里看顺序：setSize 里也有一次 petApplyConfigApi（那次是**故意**
+  // 不等落盘的，要的就是实时缩放），拿整份文件去 indexOf 会把它数进来，哨兵就废了
+  const persist = /function persist\(\)[\s\S]*?\n  \}/.exec(store)?.[0] ?? '';
+  eq(persist.length > 0, true, 'pet store 里找得到 persist()（找不到说明结构变了，哨兵要跟着改）');
+  const flushAt = persist.indexOf('flushAppState(');
+  const applyAt = persist.indexOf('petApplyConfigApi');
+  eq(flushAt >= 0, true, 'persist() 里调了 flushAppState（不 flush 就是广播出去一份旧配置）');
+  eq(
+    flushAt >= 0 && flushAt < applyAt,
+    true,
+    'flushAppState 排在 petApplyConfigApi 之前（顺序反了 = 桌宠图片停留在上一次更新）',
+  );
+
+  // 2. **拖拽反馈不许改几何。** 桌宠窗口是贴着精灵大小的，而且 overflow:hidden，
+  //    任何 scale / translate 都会把精灵顶出窗口边界被裁掉（review 报的「拖拽中图片会下移」）。
+  const stage = await readFile('src/components/pet/PetStage.vue', 'utf-8');
+  const dragging = /&--dragging\s*\{([\s\S]*?)\}/.exec(stage)?.[1] ?? '';
+  eq(dragging.length > 0, true, 'PetStage.vue 里找得到拖拽态那条样式（找不到说明结构变了）');
+  eq(
+    /transform\s*:/.test(dragging),
+    false,
+    '拖拽态不含 transform（窗口贴着精灵大小 + overflow:hidden，一放大就被裁成「图片下移」）',
+  );
+
+  // 3. **菜单归右键。** review 定的（原来是左键单击弹菜单）。左键那一支只负责拖拽 / 单击动画。
+  const presenter = await readFile('src/composables/usePetPresenter.ts', 'utf-8');
+  eq(
+    presenter.includes('event.button === 2'),
+    true,
+    '右键才弹菜单（review 改的交互，左键留给拖拽与点击动画）',
+  );
+
+  // 4. **主进程摆窗口一律 setBounds 且显式带宽高，绝不用 setPosition。**
+  //    真 Electron 探针在本机（scaleFactor = 1.25）量到的：透明无边框窗口 setPosition
+  //    连打 120 次，160×160 变成了 296×256——位置对，**尺寸自己一路膨胀**（非整数缩放下
+  //    每次都要做一遍 DIP ↔ 物理像素往返取整）。同样 120 次换成 setBounds 带恒定宽高，
+  //    尺寸逐字不变。渲染进程那边是 flex-end 贴底的，窗口一路长高精灵就一路往下掉，
+  //    这就是 review 报的「拖拽中图片下移」+「n-config-provider 宽高越来越大」。
+  const petWindow = await readFile('electron/main/pet/petWindow.ts', 'utf-8');
+  eq(
+    petWindow.includes('setPosition('),
+    false,
+    '桌宠窗口不用 setPosition（1.25 缩放下它会让窗口尺寸一路膨胀，探针量过 160→296）',
+  );
+  const move = /export function dragPetMove\([\s\S]*?\n\}/.exec(petWindow)?.[0] ?? '';
+  eq(move.length > 0, true, '找得到 dragPetMove（找不到说明结构变了，哨兵要跟着改）');
+  eq(
+    /setBounds\(\{[^}]*width:[^}]*height:/.test(move),
+    true,
+    'dragPetMove 的 setBounds 显式带上宽高（漏了宽高就等于放任缩放取整改尺寸）',
+  );
+  // 5. **尺寸不许问 getBounds()。** 同一批探针量到 getBounds() 在 1.25 缩放下会回 161；
+  //    而 petMenuBounds 是按右下角锚点反推左上角的，喂一个偏 1px 的宽高进去，
+  //    每开合一次菜单精灵就挪一格。所以主进程统一走 currentPetRect()（尺寸取 petWindowSize）。
+  eq(
+    /const\s*\{\s*x,\s*y\s*\}\s*=\s*pet\.getBounds\(\)/.test(petWindow),
+    true,
+    'currentPetRect 只从 getBounds() 取 x/y（宽高按 petWindowSize 现算）',
+  );
+  eq(
+    petWindow.includes('petMenuBounds(pet.getBounds()'),
+    false,
+    'petMenuBounds 不吃裸 getBounds()（1.25 缩放下宽高会偏 1px，锚点跟着漂）',
+  );
+  // 6. **applyPetConfig 必须先取锚点、再改 petSize。** currentPetRect() 用的就是 petSize：
+  //    先改了它，算出来的右下角是「新尺寸摆在老位置上」的那个角，于是 petMenuBounds 反推出
+  //    的左上角原地不动 = 窗口向**右下**长，桌宠每调一次大小就往右下角爬一截。
+  //    顺序对了才是「右下角不动、向左上长」，跟菜单展开是同一个锚点。
+  const apply = /export function applyPetConfig\([\s\S]*?\n\}/.exec(petWindow)?.[0] ?? '';
+  eq(apply.length > 0, true, '找得到 applyPetConfig（找不到说明结构变了，哨兵要跟着改）');
+  // 比的是**赋值语句**而不是裸函数名：上面那段注释里也写着 currentPetRect()，
+  // 拿函数名去 indexOf 会一直命中注释（它恒在两行之上），顺序反过来也照样绿
+  const rectAt = apply.indexOf('const current = currentPetRect()');
+  const sizeAt = apply.indexOf('petSize = clampPetSize(');
+  eq(rectAt >= 0 && sizeAt >= 0, true, 'applyPetConfig 里既取锚点也改 petSize');
+  eq(
+    rectAt >= 0 && sizeAt >= 0 && rectAt < sizeAt,
+    true,
+    'applyPetConfig 先取锚点再改 petSize（反了 = 调大小时桌宠往右下角爬）',
+  );
+}
+
+/* ======== #26 桌宠：隐藏到托盘 + 置顶抢占（review 第四轮加的两条） ======== */
+
+{
+  const petWindow = await readFile('electron/main/pet/petWindow.ts', 'utf-8');
+  // 托盘那份实现 26 之后被泛化成了全进程共用（主窗口的「最小化到托盘」也用它），
+  // 从 pet/tray.ts 搬到了 main/tray.ts
+  const tray = await readFile('electron/main/tray.ts', 'utf-8');
+  const menu = await readFile('src/components/pet/PetMenu.vue', 'utf-8');
+
+  // 1. **菜单里有「隐藏桌宠」这一项。** 少了它托盘那一整套就没有入口。
+  eq(menu.includes('hidePetApi('), true, '菜单里有「隐藏桌宠」（接的是 hidePetApi）');
+
+  // 2. **托盘图标的可用性必须自己查，不能靠 try/catch。** 真 Electron 探针量到：
+  //    `new Tray(nativeImage.createEmpty())` 在 Windows 上**照建不误也不抛**，
+  //    isDestroyed() 还是 false——只是任务栏上什么都看不见。而隐藏之后主窗口多半也是
+  //    隐藏的、桌宠又 skipTaskbar，那就是一个叫不回来的 app。
+  const ensure = /export function ensureTray\([\s\S]*?\n\}/.exec(tray)?.[0] ?? '';
+  eq(ensure.length > 0, true, '找得到 ensureTray（找不到说明结构变了，哨兵要跟着改）');
+  const emptyAt = ensure.indexOf('isEmpty()');
+  const newTrayAt = ensure.indexOf('new Tray(');
+  eq(emptyAt >= 0, true, 'ensureTray 自己查过图标是不是空的（空图标不抛，try/catch 守不住）');
+  eq(
+    emptyAt >= 0 && newTrayAt >= 0 && emptyAt < newTrayAt,
+    true,
+    '空图标在 new Tray 之前就被挡掉（顺序反了 = 建出一个看不见的托盘图标，用户叫不回桌宠）',
+  );
+  // 托盘是隐藏期间唯一的出口，所以它自己必须带一条真正的退出。
+  // **只在 ensureTray 里那个 buildFromTemplate 数组里找**：文件头注释里也写着「菜单里必须有
+  // 「退出 app」」，拿整份文件去 includes，把真菜单项改成别的字照样绿（红证抓出来的）。
+  // 而且这一项必须是**本模块自己追加**的、不从 spec.items 来——那样「没有出口的托盘」
+  // 在结构上就拼不出来（调用方漏写也不影响）
+  const trayMenu = /Menu\.buildFromTemplate\(\[([\s\S]*?)\]\)/.exec(ensure)?.[1] ?? '';
+  eq(trayMenu.length > 0, true, '找得到托盘菜单模板（找不到说明结构变了，哨兵要跟着改）');
+  eq(trayMenu.includes('退出 app'), true, '托盘菜单里有「退出 app」（托盘是隐藏期间唯一的出口）');
+  // 换 owner 时不清旧的左键监听，两边的回调会叠着跑（探针量过：监听数变成 2，一次 click
+  // 把两个都跑了——表现就是「点一下托盘，桌宠和主窗口一起冒出来」）
+  eq(
+    ensure.includes("removeAllListeners('click')"),
+    true,
+    '换 owner 时先清掉旧的 click 监听（不清 = 两个持有者的回调叠着跑）',
+  );
+
+  // 3. **先确认托盘可用，再 hide()。** 只在函数体里比先后（JSDoc 里也讲了这条约定，
+  //    拿整份文件去 indexOf 会命中注释——本功能已经栽过两次的那种坏金丝雀）。
+  const hide = /export function hidePetWindow\([\s\S]*?\n\}/.exec(petWindow)?.[0] ?? '';
+  eq(hide.length > 0, true, '找得到 hidePetWindow（找不到说明结构变了，哨兵要跟着改）');
+  const ensureAt = hide.indexOf('ensureTray(');
+  const hideAt = hide.indexOf('pet.hide()');
+  eq(ensureAt >= 0 && hideAt >= 0, true, 'hidePetWindow 里既建托盘也藏窗口');
+  eq(
+    ensureAt >= 0 && hideAt >= 0 && ensureAt < hideAt,
+    true,
+    '托盘建起来了才 hide()（反了 = 先藏进一个没有出口的地方，主窗口也是隐藏的）',
+  );
+
+  // 4. **置顶要周期性抢回来。** alwaysOnTop 只把窗口放进「置顶那一层」，层内后来者在前：
+  //    探针量到桌宠（名次 1）在新建一个同样 alwaysOnTop 的窗口后立刻掉到名次 2——
+  //    会议软件共享屏幕那条悬浮条就是这么把它压下去的（review 报的「一录屏桌宠就不见了」）。
+  //    抢回来只能主动重排，而且没有事件可听（悬浮条出现时桌宠不会 blur，它本来就没焦点）。
+  const guard = /function startTopmostGuard\(\)[\s\S]*?\n\}/.exec(petWindow)?.[0] ?? '';
+  eq(guard.length > 0, true, '找得到 startTopmostGuard（找不到说明结构变了，哨兵要跟着改）');
+  // **只在守卫体里找 moveTop**：`showPetWindow()` 自己也调一次，拿整份文件去 includes，
+  // 把守卫里那句换成别的照样绿（红证抓出来的）
+  eq(
+    guard.includes('moveTop()'),
+    true,
+    '桌宠会周期性主动抬回置顶（不抬就会被会议软件那条置顶悬浮条压下去）',
+  );
+  eq(
+    guard.includes('PET_TOPMOST_REASSERT_MS'),
+    true,
+    '抬回置顶的周期走的是 shared 里那个常数（不许在这儿写死一个数）',
+  );
+  eq(
+    PET_TOPMOST_REASSERT_MS >= 500 && PET_TOPMOST_REASSERT_MS <= 5000,
+    true,
+    '抬回置顶的周期在合理区间（太密会一直和别人的置顶窗口打架，太疏会被压住很久）',
+  );
+  // 5. **窗口销毁时必须停掉守卫并撤掉托盘。** interval 会把事件循环一直吊着；
+  //    托盘留着的话，托盘区会剩一个点了什么都不会发生的图标。
+  //    这个文件里有两个 `window.on('closed'`（一个是主窗口的），认 `pet = null` 那个。
+  const closedBlocks = [
+    ...petWindow.matchAll(/window\.on\('closed', \(\) => \{[\s\S]*?\n {2}\}\)/g),
+  ]
+    .map((m) => m[0])
+    .filter((b) => b.includes('pet = null'));
+  eq(closedBlocks.length, 1, '找得到桌宠窗口自己的 closed 处理器（找不到说明结构变了）');
+  eq(
+    (closedBlocks[0] ?? '').includes('stopTopmostGuard()'),
+    true,
+    '桌宠销毁时停掉置顶守卫（漏了这个 interval 会一直吊着事件循环）',
+  );
+  eq(
+    (closedBlocks[0] ?? '').includes("releaseTray('pet')"),
+    true,
+    '桌宠销毁时撤掉自己那份托盘（漏了会剩一个点不动的图标；用 releaseTray 而不是 destroyTray，那一刻托盘可能归主窗口）',
+  );
+}
+
+/* ======== 关闭主窗口时的行为：退出 / 收进托盘 / 每次询问（2026-09-11 追加） ======== */
+
+{
+  // 1. **归一化永不抛、脏值一律回默认。** 这个值从磁盘来（用户手改过、旧版本写过、
+  //    半截写坏过都可能），而它决定「点 ✕ 会发生什么」——落到 default 分支等于关不掉窗口。
+  for (const dirty of [undefined, null, {}, [], 0, '', 'TRAY', 'quit ', 'ask\n', NaN]) {
+    eq(
+      normalizeCloseAction(dirty),
+      APP_CLOSE_ACTION_DEFAULT,
+      `normalizeCloseAction(${JSON.stringify(dirty)}) 回默认值（脏值不许穿过去）`,
+    );
+  }
+  for (const good of APP_CLOSE_ACTIONS) {
+    eq(normalizeCloseAction(good), good, `normalizeCloseAction('${good}') 原样返回`);
+  }
+  eq(APP_CLOSE_ACTIONS.length, 3, '关闭动作恰好三态（询问 / 退出 / 托盘）');
+  eq(new Set(APP_CLOSE_ACTIONS).size, APP_CLOSE_ACTIONS.length, '三态没有重复项');
+  eq(
+    (APP_CLOSE_ACTIONS as readonly string[]).includes(APP_CLOSE_ACTION_DEFAULT),
+    true,
+    '默认值就在这三项里',
+  );
+  // 默认必须是「每次询问」：另外两个都是不可逆的（退了任务就断、藏了要会用托盘），
+  // 没存过设置的人第一次点 ✕ 不该被静默处理
+  eq(APP_CLOSE_ACTION_DEFAULT, 'ask', '默认是「每次询问」（另外两个都不可逆）');
+
+  const appClose = await readFile('electron/main/appClose.ts', 'utf-8');
+  const nav = await readFile('electron/main/windowNav.ts', 'utf-8');
+  const petWindow = await readFile('electron/main/pet/petWindow.ts', 'utf-8');
+  const sideNav = await readFile('src/components/layout/SideNav.vue', 'utf-8');
+  const home = await readFile('src/views/HomeView.vue', 'utf-8');
+  const settings = await readFile('src/views/SettingsView.vue', 'utf-8');
+  const modal = await readFile('src/components/layout/CloseConfirmModal.vue', 'utf-8');
+
+  // 2. **`quitting` 的判断必须排在 preventDefault 之前。** `app.quit()` 会给每个窗口发
+  //    `close`，拦截器一 preventDefault 就把退出吃掉了——托盘的「退出 app」、桌宠菜单的
+  //    「退出 app」全压在这条顺序上（`quitAppFromPet` 早踩过一次同样的坑）。
+  const closeHandler = /window\.on\('close', \(event\) => \{[\s\S]*?\n {2}\}\)/.exec(appClose)?.[0] ?? '';
+  eq(closeHandler.length > 0, true, '找得到主窗口的 close 处理器（找不到说明结构变了）');
+  const quittingAt = closeHandler.indexOf('if (quitting) return');
+  const preventAt = closeHandler.indexOf('preventDefault()');
+  eq(quittingAt >= 0 && preventAt >= 0, true, 'close 处理器里既看 quitting 也会拦下来');
+  eq(
+    quittingAt >= 0 && preventAt >= 0 && quittingAt < preventAt,
+    true,
+    'quitting 的放行排在 preventDefault 之前（反了 = 点「退出 app」被自己拦成最小化）',
+  );
+  // 标志由 before-quit 置上：真 Electron 探针量过它先于窗口的 close
+  eq(
+    /app\.on\('before-quit'[\s\S]{0,120}quitting = true/.test(appClose),
+    true,
+    'quitting 由 app.on(before-quit) 置上（探针量过它先于窗口 close）',
+  );
+  // 3. **桌宠那条规则优先。** 桌宠开着时主窗口的 close 由 petWindow 拦成 hide()，
+  //    这里必须早退，不然会先弹一个「要退出吗」的框，而两个窗口寿命本该是独立的。
+  eq(
+    closeHandler.includes('isPetWindowOpen()'),
+    true,
+    'close 处理器里给桌宠模式留了早退（桌宠开着时不该弹关闭确认框）',
+  );
+
+  // 4. **先确认托盘可用，再 hide()**（同桌宠那条，只是换到主窗口上）。收进托盘这件事
+  //    放在 windowNav.ts：桌宠的「退出桌宠」也要用它，而 appClose 反过来要用
+  //    isPetWindowOpen()，放一起会成环。
+  const hideHost = /export function hideHostToTray\([\s\S]*?\n\}/.exec(nav)?.[0] ?? '';
+  eq(hideHost.length > 0, true, '找得到 hideHostToTray（找不到说明结构变了，哨兵要跟着改）');
+  const hostEnsureAt = hideHost.indexOf('ensureTray(');
+  const hostHideAt = hideHost.indexOf('window.hide()');
+  eq(hostEnsureAt >= 0 && hostHideAt >= 0, true, 'hideHostToTray 里既建托盘也藏窗口');
+  eq(
+    hostEnsureAt >= 0 && hostHideAt >= 0 && hostEnsureAt < hostHideAt,
+    true,
+    '托盘建起来了才 hide() 主窗口（反了 = 藏进一个没有出口的地方，用户只剩任务管理器）',
+  );
+  eq(hideHost.includes('return false'), true, '托盘建不起来时 hideHostToTray 回 false（调用方据此保留窗口）');
+  // 「两个托盘永不共存」这个结论的前提：主窗口那份托盘菜单里**不许**有通往桌宠的入口。
+  // 认 `label:` 那个字面量而不是裸的「打开桌宠」——函数体里那段注释正解释着「为什么不放」，
+  // 拿裸串去 includes 只会一直命中注释（这条哨兵第一次跑就是这么红的）
+  eq(
+    /label: '打开桌宠'/.test(hideHost),
+    false,
+    '主窗口的托盘菜单里没有「打开桌宠」那一项（那会打破单 Tray 的前提）',
+  );
+
+  // 5. **「最小化到托盘」失败不许变成静默退出。** 那会把正在跑的 ffmpeg 一起杀掉，
+  //    比不藏糟得多——所以 tray 分支失败后走的是弹窗，而不是放行 close。
+  const trayBranchAt = closeHandler.indexOf("closeAction === 'tray'");
+  eq(trayBranchAt >= 0, true, 'close 处理器里有 tray 分支');
+  eq(
+    closeHandler.slice(trayBranchAt).includes('promptClose()'),
+    true,
+    'tray 分支失败后回落到弹窗（绝不静默退出，那会杀掉正在跑的转码）',
+  );
+
+  // 6. **退出桌宠 = 桌宠退场 + app 收进托盘，不把主窗口弹出来**（用户 2026-09-11 定的
+  //    「退出桌宠不需要重新打开 app」）。托盘建不起来才回落到 showHostWindow。
+  const closePet = /export async function closePetWindow\([\s\S]*?\n\}/.exec(petWindow)?.[0] ?? '';
+  eq(closePet.length > 0, true, '找得到 closePetWindow（找不到说明结构变了，哨兵要跟着改）');
+  const trayFirstAt = closePet.indexOf('hideHostToTray()');
+  const showAt = closePet.indexOf("showHostWindow('app')");
+  eq(trayFirstAt >= 0, true, '退出桌宠时把 app 收进托盘（而不是把主窗口弹出来）');
+  eq(
+    showAt < 0 || trayFirstAt < showAt,
+    true,
+    '显示主窗口只是托盘不可用时的回落（顺序反了 = 又变回「退出桌宠就弹 app」）',
+  );
+  // 销毁桌宠**之后**才没有出口了，所以托盘必须先立起来
+  const destroyAt = closePet.indexOf('pet.destroy()');
+  eq(
+    destroyAt >= 0 && trayFirstAt < destroyAt,
+    true,
+    '托盘先立起来再销毁桌宠（反了 = 中间一段既没窗口也没托盘）',
+  );
+
+  // 7. **AI 入口排在「设置」上面**（用户原话「ai 入口放在设置 tab 上面」——顺序就是需求本身）。
+  const footer = /const footerOptions = computed<MenuOption\[\]>\([\s\S]*?\n\}\);/.exec(sideNav)?.[0] ?? '';
+  eq(footer.length > 0, true, '找得到侧栏底部那组菜单项（找不到说明结构变了）');
+  const aiKeyAt = footer.indexOf("key: 'ai'");
+  const settingsKeyAt = footer.indexOf("key: 'settings'");
+  eq(aiKeyAt >= 0 && settingsKeyAt >= 0, true, '底部既有 AI 助手也有设置');
+  eq(aiKeyAt < settingsKeyAt, true, 'AI 助手排在「设置」上面（用户原话就是这条）');
+  // 8. **首页那块 AI 卡片删干净、入口没丢。** 两处一起断言：只删不加 = 用户找不到 AI 了。
+  eq(home.includes('openAiWindowApi'), false, '首页不再有 AI 入口（全 app 只留侧栏那一个）');
+  eq(sideNav.includes('openAiWindowApi'), true, '侧栏那一行真的会开 AI 窗口（入口没丢）');
+  // AI 那一项不跳路由（它开的是独立窗口），所以 handleSelect 里必须有分流
+  eq(
+    /if \(key === 'ai'\)/.test(sideNav),
+    true,
+    'handleSelect 给 AI 那项做了分流（不然会去 keyToPath 找一个不存在的路由）',
+  );
+
+  // 9. **设置页的三选一必须覆盖全部三态。** 少一项 = 有个状态用户根本设不到。
+  const optionValues = [...settings.matchAll(/value: '(ask|quit|tray)'/g)].map((m) => m[1]);
+  eq(
+    optionValues.length,
+    APP_CLOSE_ACTIONS.length,
+    '设置页的 radio 选项数等于关闭动作的态数（少一项 = 有个状态设不到）',
+  );
+  eq(new Set(optionValues).size, APP_CLOSE_ACTIONS.length, '三个选项各不相同');
+
+  // 10. **弹窗三个出口都在，且托盘那条路的失败被处理了**（按钮置灰 + 保留弹窗）。
+  for (const choice of ['cancel', 'quit', 'tray']) {
+    eq(modal.includes(`'${choice}'`), true, `关闭确认弹窗里有 '${choice}' 这个出口`);
+  }
+  eq(
+    modal.includes('trayFailed') && /:disabled="trayFailed"/.test(modal),
+    true,
+    '托盘不可用时那个按钮会置灰（弹窗留在屏幕上，窗口也还在）',
+  );
 }
 
 /* ---------------------------------- 汇总 ---------------------------------- */

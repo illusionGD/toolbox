@@ -88,6 +88,15 @@ ai 6.0.275 / @ai-sdk/anthropic 3.0.116 / @ai-sdk/openai 3.0.106
 
 **不可用时不许假装加密**：`encrypted:false` 落明文并在设置页显著提示（`aiConfig.hasPlaintextKey`）。`isEncryptionAvailable()` 本身抛错、文件损坏、会话中途恢复（文件里明文与密文混着）三条分支都有断言。
 
+## 提示词集中管理：`electron/shared/prompts.ts`
+
+review 提「ai 的 prompt 要统一维护才行，后续还有不同的 prompt」，用户拍**只集中、不改行为**。所以它是**全仓库唯一出处**：内置、写死、发到模型的提示词一律放这，以后加新的人设/功能提示词就是**加一个具名常量**，不是在调用点内联字符串。
+
+- 首轮挪进来两处：`TEST_CONNECTION_PROMPT`（测试连接那句「你好，请只回复连接正常四个字」，原在 `chat.ts` 内联）与 `buildSystemPrompt(custom)`（system 组装规则，原是 `config.systemPrompt.trim() ? { system: ... } : {}` 内联，抽成函数顺带把「空 = 没有 system，不是空 system」从注释升成文档）。
+- **两条边界**：用户可编辑的每份 `systemPrompt` 是运行时数据（在 `app-state.json`），**不进常量表**；工具描述（registry.ts）跟着各工具 schema 走、是结构化元数据、也已经集中在那一处，不归这里。
+- 放 `shared/`（同 `shared/ai.ts` 的理由）：**两端都可能是使用方**——现在只有主进程调用，配置弹窗将来要预览/编辑预设时渲染进程也要读同一份。纯常量不碰 Electron/DOM，esbuild 打包法的桩测直接打进来。
+- **行为零变化**（用户明确要求）：留空依旧不下发 system、测试连接消息逐字相同，桩测断言数未动（`pnpm verify:ai` **142 + 193 全绿**）。改动只在主进程 bundle，渲染进程 `4,019,683 B` 逐字节未变。
+
 ## 图片：渲染进程不碰 base64
 
 `ai:stageImage(source)` 收文件路径或剪贴板 data URL，主进程 sharp **长边 1568 / JPEG q80** 降采样落盘，返回 `{id, path, mediaType, width, height, bytes, thumbnailDataUrl}`（缩略图 64px webp data URL，只给列表回显）。发送时**只把 `path` + `mediaType` 过 IPC**，主进程读成 Buffer 交给 SDK 的 `{type:'image', image, mediaType}`，各家 part 格式由 SDK 转——实测确实转对了：openai 出 `image_url` 的 data URL、anthropic 出 `source.base64` + `media_type`、google 出 `inlineData.mimeType`。
@@ -147,6 +156,7 @@ ai 6.0.275 / @ai-sdk/anthropic 3.0.116 / @ai-sdk/openai 3.0.106
 - **最小化不会把窗口位置写坏，不需要额外守卫**（真 Electron 探针量的，Windows + frameless + transparent）：最小化期间 `getBounds()` 回的仍是**还原后的**位置（Win32 那个 `-32000` 被 Electron 兜住了），而且最小化只触发 `move` 与 `minimize`，**不触发我们落盘用的 `moved` / `resized`** —— 于是它压根不会排一次写盘。**这条是先量后写的**：本来准备加一个「最小化时跳过 scheduleSave」的守卫，量完发现现有的 `moved`/`resized` 选择已经把这件事挡住了，就没加那段投机代码。
 - ⚙ 是**跨窗口跳转**：`ai:openSettings` → 主进程聚焦主窗口 → 推 `ai:navigateSettings` → 主窗口 `router.push('/settings')`。所以 `navigateSettings` **是推送通道、不注册 invoke handler**（有断言守这条）。改完配置切回 AI 窗口，`window.focus` 里 `refreshAppState()` + `aiConfig.hydrate()` 重读磁盘——**不 hydrate 这边就一直停在打开时那份**。
 - `host.on('closed')` → 销毁 AI 窗口。少这条，关掉主窗口后 `window-all-closed` 不触发，进程会剩一个 AI 窗口挂着不退。
+- **这套模式现在有第二个使用者：桌宠（#26a，见 [[desktop-pet]]）**——`?pet=1` 是第三个分叉，窗口生命周期、防抖落盘、`resolveBounds` 重新夹回当前显示器、host `closed` → 销毁子窗口全是照这里抄的。随之抽了共用件：**`focusHostSettings()` 已从 `panelWindow.ts` 挪进 `electron/main/windowNav.ts` 的 `showHostWindow(target: 'app' | 'settings')`，host 引用（`initWindowNav`）也一起挪了过去**——两个子窗口各存一份 host 引用，迟早有一份是过期的。`panelWindow.ts` 里不再有 `let host`，`resolveBounds` 改用 `getHostWindow()`。注意 `showHostWindow` 里那句 `show()` 不能省：桌宠模式下 host 是 `hide()` 的，只 `restore()+focus()` 显示不出来（AI 窗口这边原来的实现不需要它，因为主窗口从来不隐藏）。
 
 ### 窗口位置尺寸：主进程自己写 `aiWindow` 命名空间
 

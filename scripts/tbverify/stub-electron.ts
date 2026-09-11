@@ -111,6 +111,84 @@ export const screen = {
   },
 };
 
+/**
+ * 最小 `Tray` / `Menu` / `nativeImage` 替身。
+ *
+ * `main/tray.ts` 的行为（空图标先挡、换 owner 先清监听、「退出 app」由模块自己追加）
+ * 是**源码哨兵**在守的，不是这里跑出来的——这三个绑定只为「导入期不炸」而存在。
+ * 真机上那几条结论都是真 Electron 探针量的，桩里模拟一个 Tray 反而会给出假的安全感。
+ */
+export class Tray {
+  /**
+   * @param icon 托盘图标（桩里只记下来）。
+   */
+  constructor(public icon: unknown = {}) {}
+  /** 设置悬浮提示。 */
+  setToolTip(): void {}
+  /** 设置右键菜单。 */
+  setContextMenu(): void {}
+  /** 清掉某个事件的全部监听。 */
+  removeAllListeners(): void {}
+  /** 挂监听。 */
+  on(): void {}
+  /**
+   * 是否已销毁。
+   * @returns 恒为 false。
+   */
+  isDestroyed(): boolean {
+    return false;
+  }
+  /** 销毁。 */
+  destroy(): void {}
+}
+
+export const Menu = {
+  /**
+   * 由模板建菜单。
+   * @param template 菜单项数组（桩里原样带回）。
+   * @returns 菜单替身。
+   */
+  buildFromTemplate(template: unknown) {
+    return { template };
+  },
+};
+
+export const nativeImage = {
+  /**
+   * 从路径读图（桩里恒为空图）。
+   * @returns 图片替身。
+   */
+  createFromPath() {
+    return {
+      /**
+       * 是否空图。
+       * @returns 恒为 true（桩测不带图标文件）。
+       */
+      isEmpty: () => true,
+      /**
+       * 缩放。
+       * @returns 自身。
+       */
+      resize() {
+        return this;
+      },
+    };
+  },
+  /**
+   * 空图。
+   * @returns 图片替身。
+   */
+  createEmpty() {
+    return {
+      /**
+       * 是否空图。
+       * @returns 恒为 true。
+       */
+      isEmpty: () => true,
+    };
+  },
+};
+
 export const shell = {
   /**
    * 用系统浏览器打开链接。

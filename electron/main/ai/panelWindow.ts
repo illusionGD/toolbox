@@ -12,7 +12,7 @@ import { BrowserWindow, screen } from 'electron';
 import { join } from 'path';
 import { is } from '@electron-toolkit/utils';
 import { registerExternalLinkGuards } from '../externalLinks';
-import { AI_CHANNELS } from '../../shared/channels';
+import { getHostWindow, showHostWindow } from '../windowNav';
 import type { AiWindowState } from '../../shared/types';
 import {
   AI_PANEL_MIN_HEIGHT,
@@ -29,8 +29,6 @@ const AI_WINDOW_NS = 'aiWindow';
 /** 位置尺寸落盘防抖毫秒数。拖动窗口时 `move` 会连续触发，不防抖会刷爆写盘。 */
 const SAVE_DEBOUNCE = 400;
 
-/** 主窗口（推送与默认位置都要用它）。 */
-let host: BrowserWindow | null = null;
 /** AI 对话窗口；没开时为 null。 */
 let panel: BrowserWindow | null = null;
 /** 落盘防抖计时器。 */
@@ -74,9 +72,7 @@ function scheduleSave(): void {
  * @param window 主窗口。
  */
 export function initPanelWindow(window: BrowserWindow): void {
-  host = window;
   window.on('closed', () => {
-    host = null;
     if (panel && !panel.isDestroyed()) panel.destroy();
   });
 }
@@ -94,7 +90,7 @@ async function resolveBounds(): Promise<PanelRect> {
     const display = screen.getDisplayMatching(saved);
     return clampPanelBounds(saved, display.workArea);
   }
-  const reference = host && !host.isDestroyed() ? host.getContentBounds() : undefined;
+  const reference = getHostWindow()?.getContentBounds();
   const display = reference ? screen.getDisplayMatching(reference) : screen.getPrimaryDisplay();
   return defaultPanelBounds(reference ?? display.workArea, display.workArea);
 }
@@ -152,6 +148,19 @@ export async function openPanelWindow(): Promise<void> {
 }
 
 /**
+ * 拿到 AI 对话窗口（**只给需要往它推消息的模块用**）。
+ *
+ * 目前唯一的调用方是 `pet/petWindow.ts` 的 `applyPetConfig`：助手头像存在桌宠配置里
+ * （`aiAvatarRef`），配置变了得让已经开着的对话窗口自己重读，不然换了头像要关掉重开
+ * 才看得见。返回的是句柄而不是「发消息」的函数，是为了不在这个文件里堆一串
+ * `notifyXxx` ——推什么由发起方决定，这边只负责它是不是还活着。
+ * @returns 窗口句柄；没开或已销毁时是 null。
+ */
+export function getPanelWindow(): BrowserWindow | null {
+  return panel && !panel.isDestroyed() ? panel : null;
+}
+
+/**
  * 切换 AI 窗口置顶。
  * @param top 是否置顶。
  * @returns 切换后的状态；窗口没开时恒为 false。
@@ -186,12 +195,9 @@ export function minimizePanelWindow(): boolean {
  * AI 窗口里点 ⚙：把主窗口拉到前面并让它跳到设置页。
  *
  * AI 窗口自己没有路由（它只挂对话那一个组件），配置界面在主窗口的设置页里。
+ * 实现已抽进 `windowNav.ts`——#26 的桌宠菜单要的是同一件事。
  * @returns 是否推给了主窗口。
  */
 export function focusHostSettings(): boolean {
-  if (!host || host.isDestroyed()) return false;
-  if (host.isMinimized()) host.restore();
-  host.focus();
-  host.webContents.send(AI_CHANNELS.navigateSettings);
-  return true;
+  return showHostWindow('settings');
 }

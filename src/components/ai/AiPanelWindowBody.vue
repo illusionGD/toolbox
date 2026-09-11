@@ -126,6 +126,7 @@ import AiMessageItem from './AiMessageItem.vue';
 import AiComposer from './AiComposer.vue';
 import { useAiChatStore } from '@/stores/aiChat';
 import { useAiConfigStore } from '@/stores/aiConfig';
+import { usePetStore } from '@/stores/pet';
 import { minimizeAiWindowApi, openAiSettingsApi, setAiWindowTopApi } from '@/services/ai';
 import { readState, refreshAppState } from '@/services/appState';
 import { setMessageApi } from '@/utils/feedback';
@@ -134,6 +135,7 @@ import { formatRelativeTime } from '@/utils/format';
 // #region setup
 const chat = useAiChatStore();
 const configStore = useAiConfigStore();
+const petStore = usePetStore();
 
 // 注册全局 message 实例：这个窗口有自己的 provider 树，不注册 showError 只会进 console
 setMessageApi(useMessage());
@@ -172,6 +174,8 @@ const STICK_THRESHOLD = 40;
 let stick = true;
 /** 内容高度观察器。 */
 let contentObserver: ResizeObserver | null = null;
+/** 桌宠配置变更的退订函数（助手头像存在那份配置里）。 */
+let offPetConfig: (() => void) | null = null;
 
 /**
  * 滚动跟随：**由真实的高度变化驱动，而不是由文本长度驱动**。
@@ -208,6 +212,9 @@ onMounted(() => {
   void chat.ensureLoaded();
   void configStore.refreshKeyStatus();
   window.addEventListener('focus', onWindowFocus);
+  // 桌宠配置变了（换了助手头像）→ 立刻重读。**光靠 focus 那条不够**：用户可能把这个窗口
+  // 摆在旁边一直看着，在主窗口改完头像时这边压根不会重新获得焦点
+  offPetConfig = window.api.pet.onConfigChanged(() => void refreshPetConfig());
   const list = listEl.value;
   if (list) {
     contentObserver = new ResizeObserver(() => {
@@ -219,20 +226,34 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('focus', onWindowFocus);
+  offPetConfig?.();
+  offPetConfig = null;
   contentObserver?.disconnect();
   contentObserver = null;
 });
 // #endregion
 
 /**
+ * 重读桌宠配置（助手头像在里面）。
+ *
+ * 两步都不能省：`refreshAppState()` 刷的是**这个窗口的内存快照**（磁盘上已经是新的了，
+ * 但快照还停在开窗那一刻），`hydrate()` 才把它灌进 store。
+ */
+async function refreshPetConfig(): Promise<void> {
+  await refreshAppState();
+  petStore.hydrate();
+}
+
+/**
  * 回到这个窗口时重读配置。
  *
  * 用户刚在主窗口的设置页加了配置或填了 key，这边的内存快照还是打开窗口时读到的那份，
- * 不重读就会一直显示「还没有 AI 配置」。
+ * 不重读就会一直显示「还没有 AI 配置」。桌宠配置一起重读——助手头像也在那份里。
  */
 async function onWindowFocus(): Promise<void> {
   await refreshAppState();
   configStore.hydrate();
+  petStore.hydrate();
   await configStore.refreshKeyStatus();
 }
 

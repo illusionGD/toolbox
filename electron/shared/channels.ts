@@ -10,6 +10,30 @@ export const WINDOW_CHANNELS = {
   close: 'window:close',
   isMaximized: 'window:isMaximized',
   onMaximizeChange: 'window:maximizeChange',
+  /**
+   * 渲染进程 → 主进程：改「关闭主窗口时」这个设置。
+   *
+   * 设置页那个 radio 与确认弹窗里的「记住我的选择」共用这一条。**必须过主进程**而不是
+   * 渲染进程自己 `writeState`：`close` 事件的处理器是**同步**的，`preventDefault()` 等不了
+   * 一次 `await readAppState()`，所以生效的动作在主进程里有一份缓存，这条通道就是刷新它的
+   * 唯一入口（顺带落盘）。见 main/appClose.ts。
+   */
+  setCloseAction: 'window:setCloseAction',
+  /**
+   * 主进程 → 主窗口：请弹「关闭确认」弹窗。
+   *
+   * 两种情况都走它：① 设置是「每次询问」；② 设置是「最小化到托盘」但**托盘建不起来**
+   * （那时不许静默退出，见 main/tray.ts 的硬规则）。弹窗是**应用内的 naive-ui 弹窗**而不是
+   * `dialog.showMessageBox`：系统弹窗的配色跟不了主题，而这一下是用户最常看见的交互之一。
+   */
+  closePrompt: 'window:closePrompt',
+  /**
+   * 渲染进程 → 主进程：按用户在弹窗里点的那一下关。
+   *
+   * 返回**是否真做到了**：托盘建不起来时 `'tray'` 会回 false，渲染进程据此把弹窗留在
+   * 屏幕上并把「最小化到托盘」置灰——所以不需要第二条通道来单独报「托盘不可用」。
+   */
+  resolveClose: 'window:resolveClose',
 } as const;
 
 /** 应用级通道。 */
@@ -230,6 +254,95 @@ export const AI_CHANNELS = {
   loadConversations: 'ai:loadConversations',
   /** 覆盖写全部会话（防抖后调用）。 */
   saveConversations: 'ai:saveConversations',
+} as const;
+
+/**
+ * 桌宠通道。
+ *
+ * 桌宠是**第二个独立的无边框透明窗口**（第一个是 AI 对话窗）。它和 AI 窗口的关键差别
+ * 是：**打开桌宠会把主窗口 `hide()` 掉**，于是这一组通道里有好几条在别处不需要——
+ * 主窗口不在了，回到 app 的路只剩桌宠自己。
+ */
+export const PET_CHANNELS = {
+  /** 打开桌宠（建窗 + 隐藏主窗口）。 */
+  open: 'pet:open',
+  /**
+   * 退出桌宠模式：销毁桌宠窗口 + **把 app 收进系统托盘**。
+   *
+   * 刻意**不把主窗口弹出来**（用户原话「退出桌宠不需要重新打开 app」）：点「退出桌宠」
+   * 多半只是想让小精灵下班，不是要看工具箱。托盘图标那时是唯一的出口，所以主进程侧
+   * 必须先确认托盘建起来了再销毁桌宠，建不起来就回落到显示主窗口。
+   * 主窗口此刻已经露着（AI 窗口的 ⚙ 能把它叫出来）就一个字都不动它。
+   */
+  close: 'pet:close',
+  /** 桌宠模式当前开着没有（首页那个开关要按它显示状态）。 */
+  isOpen: 'pet:isOpen',
+  /**
+   * 菜单里的「隐藏桌宠」：把窗口收进系统托盘（Windows 上通常落在「隐藏的图标」里）。
+   *
+   * 和 {@link close} 是两码事：`close` 退出桌宠模式（销毁窗口 + 主窗口回来），
+   * `hide` 只是让它从桌面上消失，**桌宠模式还在**，会话与位置一个都不动。
+   *
+   * **托盘图标是隐藏之后唯一的出口**——主窗口那时多半也是隐藏的，而桌宠 `skipTaskbar`。
+   * 所以主进程侧的实现必须「先确认托盘真的建起来了，再 `hide()`」，建不起来就拒绝隐藏
+   * （见 pet/tray.ts：空图标的 `new Tray()` 在 Windows 上**不抛异常**，探针量过，
+   * 光靠 try/catch 守不住）。
+   */
+  hide: 'pet:hide',
+  /**
+   * 手写拖拽的三段。
+   *
+   * 不用 `-webkit-app-region: drag`：① 它分不清点击与拖拽，而点击要弹菜单；
+   * ② 拖拽由 OS 接管，「拖拽中 / 放下」这两个动画态拿不到事件。
+   * `dragStart` 让主进程记下按下那刻的 bounds，`dragMove` 只送**相对按下点的累计位移**
+   * （绝对计算，绝不增量累加，理由见 shared/petWindow.ts 的 dragPetBounds）。
+   */
+  dragStart: 'pet:dragStart',
+  /** 拖拽中：送累计位移（rAF 节流）。 */
+  dragMove: 'pet:dragMove',
+  /** 拖拽结束：落盘位置（防抖）。 */
+  dragEnd: 'pet:dragEnd',
+  /**
+   * 菜单展开 / 收起。
+   *
+   * 菜单不是第三个窗口、也不常驻一块大透明窗口（那会在屏幕角上常年吞掉一片点击）：
+   * **展开时由主进程把窗口临时放大**，精灵始终锚在窗口右下角、窗口向左上长，
+   * 于是精灵在屏幕上一动不动。
+   */
+  setMenuOpen: 'pet:setMenuOpen',
+  /** 菜单里的「AI 对话」：主进程内部直接调 openPanelWindow()，主窗口保持隐藏。 */
+  openAiWindow: 'pet:openAiWindow',
+  /** 菜单里的「设置」/「打开 app 界面」：显示主窗口（`'settings'` 时顺带跳设置页）。 */
+  showHost: 'pet:showHost',
+  /**
+   * 菜单里的「退出 app」：整个进程退出。
+   *
+   * **不能让桌宠窗口去调 `window.api.window.close()`**：那条通道闭包的是**主窗口**
+   * （见 ipc/window.ts），从桌宠这边调它是「关掉那个已经藏起来的窗口」，语义全靠巧合。
+   *
+   * 主进程侧也不是直接 `app.quit()` 就完事：桌宠的 `close` 处理器会无条件
+   * `preventDefault()`（那是「桌宠不许成为唯一出口」那条硬规则的实现），而 `app.quit()`
+   * 会给每个窗口发 `close`——**于是退出会被桌宠自己拦掉**。必须先带标志销毁桌宠再退出，
+   * 见 pet/petWindow.ts 的 `quitAppFromPet`。
+   */
+  quitApp: 'pet:quitApp',
+  /**
+   * 主窗口 → 桌宠窗口：配置变更广播。
+   *
+   * 桌宠窗口是**另一个 BrowserWindow**，它的应用状态内存快照在主窗口改完设置后就过期了；
+   * 不广播的表现是「改了设置桌宠没反应，重启才生效」。
+   *
+   * 带上新的桌宠大小：**改大小是主进程的活**（要重设窗口 bounds 并保持右下角对齐），
+   * 不另开一条 `setSize` ——那会让设置页为一次保存发两趟 IPC，两趟之间还能穿插别的写。
+   */
+  configChanged: 'pet:configChanged',
+  /**
+   * 主进程 → 主窗口：桌宠模式开关变了。
+   *
+   * 首页那个开关不能只靠自己点的那一下来记状态：桌宠窗口被 `Alt+F4` 打中时也会退出
+   * 桌宠模式（见 petWindow.ts 的 close 拦截），不广播的话开关就停在错的位置上了。
+   */
+  stateChanged: 'pet:stateChanged',
 } as const;
 
 /** 应用状态（主题 / 各工具配置 / 使用统计）持久化通道，落在数据保存目录。 */

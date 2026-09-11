@@ -1,6 +1,12 @@
 <template>
   <div class="ai-msg" :class="`ai-msg--${message.role}`">
-    <div class="ai-msg__avatar">{{ message.role === 'user' ? '我' : 'AI' }}</div>
+    <!--
+      用户那侧还是「我」两个字（紫底圆点，配色规范里的强调位）；助手那侧是**图片头像**：
+      默认应用 logo，桌宠设置里可以换（`PetConfig.aiAvatarRef`）——这是 review 提的
+      「ai 对话框的 ai 头像默认是 logo，桌宠可以设置该头像」。
+    -->
+    <div v-if="message.role === 'user'" class="ai-msg__avatar">我</div>
+    <img v-else class="ai-msg__avatar ai-msg__avatar--img" :src="avatar" alt="AI" />
 
     <div class="ai-msg__body">
       <!-- 推理过程折叠在正文之上：deepseek-reasoner 那类会先吐一大段思考 -->
@@ -70,6 +76,7 @@ import { NButton, NCollapse, NCollapseItem } from 'naive-ui';
 import type { AiMessage, AiToolCall } from '@shared/types';
 import AiMarkdown from './AiMarkdown.vue';
 import { formatBytes } from '@/utils/format';
+import { useAiAvatar } from '@/composables/useAiAvatar';
 import { useAiChatStore } from '@/stores/aiChat';
 
 interface Props {
@@ -99,6 +106,10 @@ const STATUS_LABEL: Record<AiToolCall['status'], string> = {
  * 多两层转发；store 本身就是全局单例。
  */
 const chat = useAiChatStore();
+/**
+ * 助手头像。**整个窗口共用一个 ref**（见 useAiAvatar），所以一屏几十条消息只读一次盘。
+ */
+const avatar = useAiAvatar();
 // #endregion
 
 /**
@@ -133,6 +144,13 @@ function formatElapsed(ms: number): string {
   &--user &__avatar {
     background: var(--tb-color-primary);
     color: #fff;
+  }
+
+  // 图片头像：contain 而不是 cover —— 头像可能是张非方图（比如整只角色的立绘），
+  // cover 会把它裁得只剩中间一块
+  &__avatar--img {
+    object-fit: contain;
+    border: 1px solid var(--tb-border);
   }
 
   &__body {

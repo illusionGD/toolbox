@@ -1,24 +1,17 @@
 <template>
   <div class="home">
-    <!-- 顶部：欢迎语 + 使用统计概览 -->
+    <!-- 顶部：欢迎语 -->
     <div class="home__header">
       <div class="home__welcome">
         <h1 class="home__title">欢迎使用多功能工具箱</h1>
         <p class="home__subtitle">高效、实用、便捷的工具集合</p>
       </div>
       <!--
-        原先这里是「已使用 N 次」卡片。换成 AI 入口不丢信息：总次数在下方「使用统计」
-        环形图中心还有一份
+        这儿先后放过「已使用 N 次」卡片和 AI 入口，现在两个都不在了：
+        总次数在下方「使用统计」环形图中心还有一份；**AI 入口挪到了侧栏「设置」上面那一行**
+        （用户原话「ai 入口放在设置 tab 上面」），全 app 只留一个入口，见 SideNav.vue。
+        桌宠入口也曾并排在这儿，review 时挪到了标题栏那个 logo 上，见 TitleBar.vue。
       -->
-      <button v-if="can('ai-chat')" class="home__ai-entry" @click="openAiWindowApi()">
-        <span class="home__ai-icon">
-          <n-icon :size="24" color="#fff"><SparklesOutline /></n-icon>
-        </span>
-        <span class="home__ai-text">
-          <span class="home__ai-title">AI 助手</span>
-          <span class="home__ai-hint">{{ aiHint }}</span>
-        </span>
-      </button>
     </div>
 
     <!-- 推荐工具（分类 tab） -->
@@ -87,23 +80,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { NButton, NCard, NIcon, NTabPane, NTabs } from 'naive-ui';
-import { SparklesOutline } from '@vicons/ionicons5';
 import { RECOMMEND_GROUPS } from '@/constants/recommend';
 import { colorAt } from '@/constants/chart';
 import { useUsageStore } from '@/stores/usage';
-import { useAiConfigStore } from '@/stores/aiConfig';
-import { openAiWindowApi } from '@/services/ai';
 import { useToolLauncher } from '@/composables/useToolLauncher';
-import { useEntitlement } from '@/composables/useEntitlement';
 import { getTool } from '@/utils/navigation';
 import { formatRelativeTime } from '@/utils/format';
 import DonutChart from '@/components/common/DonutChart.vue';
 
 // #region setup
 const usageStore = useUsageStore();
-const aiConfig = useAiConfigStore();
 const { openTool } = useToolLauncher();
-const { can } = useEntitlement();
 
 const activeTab = ref(RECOMMEND_GROUPS[0]?.key ?? 'recommend');
 
@@ -123,11 +110,6 @@ const donutSegments = computed(() =>
     value: item.count,
     color: colorAt(i),
   })),
-);
-
-/** 入口副标题：没配置时直接把「要先去设置」说出来，别让用户点进去才发现。 */
-const aiHint = computed(() =>
-  aiConfig.configs.length === 0 ? '去设置页添加配置' : (aiConfig.activeConfig?.name ?? '开始对话'),
 );
 // #endregion
 </script>
@@ -155,61 +137,6 @@ const aiHint = computed(() =>
   &__subtitle {
     margin: 0;
     color: var(--tb-text-secondary);
-  }
-
-  &__ai-entry {
-    display: flex;
-    align-items: center;
-    gap: var(--tb-space-3);
-    width: 260px;
-    flex-shrink: 0;
-    padding: var(--tb-space-3);
-    text-align: left;
-    background: var(--tb-bg-surface);
-    border: 1px solid var(--tb-border);
-    border-radius: var(--tb-radius-md);
-    cursor: pointer;
-    transition:
-      border-color 0.15s,
-      transform 0.15s;
-
-    &:hover {
-      border-color: var(--tb-color-primary);
-      transform: translateY(-2px);
-    }
-  }
-
-  &__ai-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 44px;
-    height: 44px;
-    flex-shrink: 0;
-    border-radius: 50%;
-    // 紫色只在这一处强调，背景仍是中性面板色
-    background: var(--tb-color-primary);
-  }
-
-  &__ai-text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  &__ai-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--tb-text-primary);
-  }
-
-  &__ai-hint {
-    font-size: 12px;
-    color: var(--tb-text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   &__tools-grid {
