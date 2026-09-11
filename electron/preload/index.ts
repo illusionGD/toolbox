@@ -152,10 +152,7 @@ const api = {
      * @param remember 是否把这次的选择记成设置。
      * @returns 统一响应，data 为是否真做到了（false = 托盘不可用，窗口还在）。
      */
-    resolveClose: (
-      choice: AppCloseChoice,
-      remember: boolean,
-    ): Promise<IpcResponse<boolean>> =>
+    resolveClose: (choice: AppCloseChoice, remember: boolean): Promise<IpcResponse<boolean>> =>
       ipcRenderer.invoke(WINDOW_CHANNELS.resolveClose, choice, remember),
     /**
      * 订阅「请弹关闭确认弹窗」。

@@ -24,12 +24,12 @@ description: Toolbox 桌宠（#26a）——切过去主窗口 `hide()`、右下�
 
 | review 说的 | 落地在哪 | 关键点 |
 |---|---|---|
-| 「加个隐藏桌宠的功能，隐藏后放到任务栏的隐藏处」 | 新文件 `electron/main/pet/tray.ts` + `hidePetWindow()` + 菜单第六项 | **托盘建不起来就拒绝隐藏**——这是硬规则 1 在隐藏这条路上的形态，见下 |
+| 「加个隐藏桌宠的功能，隐藏后放到任务栏的隐藏处」 | 新文件 `electron/main/pet/tray.ts`（**2026-09-11 泛化成全进程共用，搬到 `electron/main/tray.ts`**，见 [[app-close-tray]]）+ `hidePetWindow()` + 菜单第六项 | **托盘建不起来就拒绝隐藏**——这是硬规则 1 在隐藏这条路上的形态，见下 |
 | 「一录屏桌宠就不见了，图层下去了」 | `startTopmostGuard()`：每 2s 一次 `moveTop()` | **不是录屏 API 的事**，是置顶层内的排队；见下 |
 
 那个 bug 的排查值得记：报的是「没办法被录屏」，听起来像 Windows 的 `SetWindowDisplayAffinity` / 硬件叠加层。**先问了两句才没走错路**——「屏幕上也看不见了，被压到别的窗口底下」+「腾讯会议 / 飞书 / 钉钉共享屏幕」，两句合起来就把范围从「录屏抓不到这个窗口」缩到「有个新窗口盖住了它」。**现象里的因果是用户的猜测，不是观测**：他看到的是「一开始录屏桌宠就没了」，「录屏导致图层下去」是解释；真正的观测只有「看不见」。
 
-文件：主进程 `electron/main/pet/petWindow.ts` + **`electron/main/pet/tray.ts`**（第四轮加的隐藏出口）+ `ipc/pet.ts` + **`electron/main/windowNav.ts`**（新抽的共用件，见下）；共享纯模块 `electron/shared/petWindow.ts`（几何）+ `electron/shared/pet.ts`（状态机与映射）；渲染 `src/stores/pet.ts`、`src/services/pet.ts`、`src/composables/{usePetPresenter,useAiAvatar}.ts`、`src/components/pet/{PetWindow,PetStage,PetMenu,PetSettingsCard}.vue`。
+文件：主进程 `electron/main/pet/petWindow.ts` + **`electron/main/tray.ts`**（第四轮加的隐藏出口；2026-09-11 从 `pet/tray.ts` 搬到这儿，带 owner 标签给主窗口的「最小化到托盘」共用，见 [[app-close-tray]]）+ `ipc/pet.ts` + **`electron/main/windowNav.ts`**（新抽的共用件，见下）；共享纯模块 `electron/shared/petWindow.ts`（几何）+ `electron/shared/pet.ts`（状态机与映射）；渲染 `src/stores/pet.ts`、`src/services/pet.ts`、`src/composables/{usePetPresenter,useAiAvatar}.ts`、`src/components/pet/{PetWindow,PetStage,PetMenu,PetSettingsCard}.vue`。
 
 技术上不是新东西：#23a 已经把「独立无边框透明置顶窗口 + 同一份 `index.html` 用 query 分叉 + 主窗口关掉时一起销毁」走通了（[[ai-chat]]），本轮**照那套再开一个窗口**，真正新的只有三处——手写拖拽、动画状态机与兜底、资源不动 CSP 地进渲染进程。
 
@@ -120,7 +120,7 @@ window.on('closed', () => { if (pet && !pet.isDestroyed()) { closing = true; pet
 
 - **拦 `close` 而不是「真关掉、要用时再建」**：`createWindow()` 里顺带注册了十几组 `ipcMain.handle`，**重复注册会直接抛**。要支持重建就得先把它拆成两半，代价远大于收益。`hide()` 之后 `showHostWindow()` 一行都不用改。
 - **对用户来说两者一样**：主窗口没了、任务栏图标也没了（桌宠 `skipTaskbar`）。区别只在进程还活着——而这正是需求要的。
-- **规则 1 依旧成立**：桌宠一定还在（不然就不会拦），而「退出桌宠」永远会把主窗口 `show()` 回来。所以仍然不存在「一个窗口都没有的僵尸进程」。
+- **规则 1 依旧成立**：桌宠一定还在（不然就不会拦），而「退出桌宠」永远会先立起另一个出口——**2026-09-11 之后那个出口是托盘图标，不再是主窗口**（用户原话「退出桌宠不需要重新打开 app」；托盘建不起来才回落到 `show()` 主窗口，见 [[app-close-tray]]）。所以仍然不存在「一个窗口都没有的僵尸进程」。
 - `closed` 那条**不能删**：走「退出 app」时主窗口是真的被销毁的，此时不销毁桌宠就会剩一个 `skipTaskbar`、任务栏上点不到的窗口。而 `quitAppFromPet` 先销毁桌宠再 `app.quit()`，那时 `isPetWindowOpen()` 已是 false，主窗口的 `close` 不会被拦——两条拦截互不打架。
 
 ### 2. 状态映射的兜底是纯函数，不是模板里的 `??`
@@ -167,7 +167,7 @@ void flushAppState()                                  // ← 先把防抖的写�
 | **两个 `alwaysOnTop` 窗口的 z 序**（第四轮） | 桌宠先开（名次 **1**），新建一个同样 `alwaysOnTop` 的窗口后桌宠掉到名次 **2**——**层内后来者在前** | 「一录屏桌宠就不见了」的根因：会议软件共享屏幕时弹的那条置顶悬浮工具条就是那个「后来者」。`alwaysOnTop` 只决定**在哪一层**，不决定层内次序 |
 | **抢回置顶的两种打法**（同一批探针，用 PowerShell 枚举 z 序核对） | `moveTop()` → 名次 **0**；再调一次 `setAlwaysOnTop(true)` → 名次 **1** | 用 `moveTop()`：更彻底、**不抢焦点**。**它也不动窗口尺寸**（专门量过——`setPosition` 那个坑就在隔壁，凡是可能碰几何的 API 都要先量） |
 | **`moveTop()` 的开销** | 100 次 **3 ms** | 2s 一次的常驻定时器代价可忽略；真正的代价是语义上的（桌宠会一直压在用户自己置顶的窗口上面），不是性能上的 |
-| **`new Tray(nativeImage.createEmpty())`** | **不抛异常**，`isDestroyed()` 还是 `false`，只是托盘区**什么都看不见** | 托盘可用性**必须自己 `isEmpty()` 查**，光 try/catch 守不住。这条直接决定了 `ensurePetTray` 的写法（先查图标、再 `new Tray`） |
+| **new Tray(nativeImage.createEmpty())** | **不抛异常**，`isDestroyed()` 还是 `false`，只是托盘区**什么都看不见** | 托盘可用性**必须自己 `isEmpty()` 查**，光 try/catch 守不住。这条直接决定了 `ensureTray` 的写法（先查图标、再 `new Tray`） |
 | **dev 下 `app.getAppPath()`** | 就是**项目根**（`out/renderer/` 此时并不存在，渲染进程由 vite dev server 供） | 托盘图标要两条候选路径：打包后 `__dirname/../renderer/icon.png`，dev 回落 `app.getAppPath()/public/icon.png` |
 
 > 探针脚本是一次性的，跑完即删（[[toolbox-workflow-conventions]]）。上面这张表就是它们留下的全部产物。
@@ -375,7 +375,7 @@ CSP（`index.html`）是 `img-src 'self' data: blob:` / `connect-src 'self' blob
 | 打开 app 界面 | `showHostFromPet('app')` |
 | —— 分隔线 —— | 上面三项是导航，下面三项是「让桌宠离开桌面」 |
 | **隐藏桌宠**（第四轮加的） | `hidePetApi()` → `hidePetWindow()`：收进系统托盘，**桌宠模式不退**。**它不算出口项、不降色**——它什么都没结束 |
-| **退出桌宠** | `closePetApi()`——和标题栏那个 logo 是同一条通道：主窗口回来 + 桌宠销毁 |
+| **退出桌宠** | `closePetApi()`——和标题栏那个 logo 是同一条通道：桌宠销毁 + **app 收进托盘**（2026-09-11 改，原来是把主窗口 `show()` 回来；用户原话「退出桌宠不需要重新打开 app」。托盘建不起来才回落到显示主窗口；主窗口此刻已经露着就一个字都不动它——AI 窗口的 ⚙ 能把它叫出来。见 [[app-close-tray]]） |
 | **退出 app** | `petQuitAppApi()` → `pet:quitApp` → `quitAppFromPet()`（**不是** `app.quit()`，理由见规则 1.1） |
 
 > **原来的假设已被 review 推翻。** 26a 初版是「三项都不关桌宠、菜单里一个出口都没有」，依据是「小精灵拥有整个 app 的控制权，它退场了控制权就没了」。用户 review 的原话是「点击桌宠弹窗的按钮加：退出桌宠、退出 app 功能」。**推翻得对**：原设计要求用户先想到「打开 app 界面」、再去找那个开关，才能退出——桌宠模式下最想干的两件事反而最绕。控制权那条理由仍然成立，但它论证的是「导航三项不关桌宠」，论证不了「不给出口」。
@@ -398,7 +398,8 @@ CSP（`index.html`）是 `img-src 'self' data: blob:` / `connect-src 'self' blob
 ```ts
 export function hidePetWindow(): boolean {
   if (!pet || pet.isDestroyed()) return false;
-  if (!ensurePetTray({ show, showHost, quit })) return false;  // ← 先确认出口，再动窗口
+  // ← 先确认出口，再动窗口。owner 标签是 2026-09-11 泛化托盘时加的
+  if (!ensureTray({ owner: 'pet', tooltip, items, onClick, onQuit })) return false;
   setPetMenuOpen(false);
   stopTopmostGuard();
   pet.hide();
@@ -409,9 +410,9 @@ export function hidePetWindow(): boolean {
 
 顺序**不许反**。隐藏之后主窗口多半也是隐藏的（桌宠模式的常态），桌宠自己又 `skipTaskbar`——托盘图标就是屏幕上唯一还能点的东西。先 `hide()` 再发现托盘建不出来，用户就被锁在一个没有任何界面的进程里了，正是规则 1 说的那种事故。
 
-而**「托盘建不出来」不会以异常的形式告诉你**：探针量到 `new Tray(nativeImage.createEmpty())` 在 Windows 上照建不误、`isDestroyed()` 还是 `false`，只是托盘区什么都看不见。所以 `ensurePetTray` 自己查 `isEmpty()`，try/catch 只是兜第二层。这条有源码金丝雀守着（`isEmpty()` 的下标必须小于 `new Tray` 的下标）。
+而**「托盘建不出来」不会以异常的形式告诉你**：探针量到 `new Tray(nativeImage.createEmpty())` 在 Windows 上照建不误、`isDestroyed()` 还是 `false`，只是托盘区什么都看不见。所以 `ensureTray` 自己查 `isEmpty()`，try/catch 只是兜第二层。这条有源码金丝雀守着（`isEmpty()` 的下标必须小于 `new Tray` 的下标）。
 
-托盘右键菜单三项：**显示桌宠 / 打开 app 界面 / 退出 app**（左键单击 = 显示桌宠，少一次右键）。**「退出 app」不能省**——托盘一旦出问题，用户就只剩任务管理器了。「打开 app 界面」时**桌宠继续躺在托盘里**：用户要的是 app 界面，不是把小精灵也一起翻出来。
+托盘右键菜单三项：**显示桌宠 / 打开 app 界面 / 退出 app**（左键单击 = 显示桌宠，少一次右键）。**「退出 app」不能省**——托盘一旦出问题，用户就只剩任务管理器了；泛化之后这一项**由 `ensureTray` 自己追加**，调用方压根传不了它，于是「没有出口的托盘」在结构上就拼不出来。「打开 app 界面」时**桌宠继续躺在托盘里**：用户要的是 app 界面，不是把小精灵也一起翻出来。
 
 图标要两条候选路径（打包后在 `out/renderer/`，dev 下那个目录根本不存在，回落项目根的 `public/`），源图 1024×1024 直接塞给托盘会被系统缩得很难看，统一 `resize` 到 32。
 
@@ -428,7 +429,7 @@ if (pet && !pet.isDestroyed()) {
 
 反过来（隐藏时仍然显示成「开着」）才是真会让人懵的：屏幕上什么都没有，点一下还把它彻底退掉。
 
-**托盘只在隐藏期间存在**，平时不常驻（桌宠自己就在桌面上，再挂一个托盘图标是重复入口）。`showPetWindow()` 里 `destroyPetTray()`；窗口 `closed` 时也要 `destroyPetTray()`——**窗口有可能是在隐藏状态下被销毁的**（从托盘点「退出 app」），不撤的话托盘区会留一个点了什么都不会发生的图标。
+**托盘只在隐藏期间存在**，平时不常驻（桌宠自己就在桌面上，再挂一个托盘图标是重复入口）。`showPetWindow()` 里 `releaseTray('pet')`；窗口 `closed` 时也要 `releaseTray('pet')`——**窗口有可能是在隐藏状态下被销毁的**（从托盘点「退出 app」），不撤的话托盘区会留一个点了什么都不会发生的图标。**用 `releaseTray('pet')` 而不是 `destroyTray()`**：那一刻托盘可能已经归主窗口了（「退出桌宠」就会把 app 收进托盘），无条件撤会把别人的出口一起撤掉。
 
 ## 置顶要周期性抢回来（第四轮 review 的 bug）
 
@@ -543,7 +544,7 @@ function startTopmostGuard(): void {
 | 守卫里 `moveTop()` 换成 `setAlwaysOnTop(true)` | 「周期性主动抬回置顶」 |
 | 守卫里把周期写死成 `2000` 字面量 | 「周期走 shared 里那个常数」 |
 | 桌宠 `closed` 里不停守卫 | 「销毁时 stopTopmostGuard」 |
-| 桌宠 `closed` 里不撤托盘 | 「销毁时 destroyPetTray」 |
+| 桌宠 `closed` 里不撤托盘 | 「销毁时 `releaseTray('pet')`」 |
 | `PET_TOPMOST_REASSERT_MS` 调到 50 | 「周期落在 [500, 5000]」 |
 
 **其中两条第一次跑出来是 0 红——又是同一个病，这是本功能第 5、6 条被红证抓出来的坏金丝雀**：
@@ -565,13 +566,13 @@ function startTopmostGuard(): void {
 
 **菜单里那块大小**：排版是**「大小」+ 输入框 + `px` 一行，滑块单独占下面一整行**（第四轮改动，也就是源码注释里说的「review 第三轮」：「设置大小的拖拽太大了，而且布局应该在 input 下面」）——看一眼滑块轨道是不是横贯整块菜单、手柄是不是和菜单文字一个量级（12px，不是默认那个比文字还高的 18px）；拖滑块 → **桌宠边跟着实时缩放**（不是松手才变），而且**从 64 拖到 512 全程可控**（挤在同一行时一格就是好几个 px，这轮改的就是它）；输入框打 `300` → 同样立刻生效；**输入框清空**时桌宠不许弹回 160；**菜单最下面那项「退出 app」不许被窗口边缘裁掉**（这块高度换了写法但总高仍是 46，裁掉就说明 `PET_MENU_SIZE_ROW` 没跟上）；改完不重启，回设置页那个滑块**读到的是新值**（验落盘）。
 
-**五项菜单**：设置 → **主窗口出现并停在设置页，桌宠还在** → AI 对话 → **AI 窗口开出来，主窗口仍然隐藏** → 打开 app 界面 → 主窗口出现 → **再点一次标题栏 logo** → **桌宠消失、主窗口留下**；菜单里「退出桌宠」→ 同上；「退出 app」→ **整个进程退出**（任务管理器里没有残留）。
+**五项菜单**：设置 → **主窗口出现并停在设置页，桌宠还在** → AI 对话 → **AI 窗口开出来，主窗口仍然隐藏** → 打开 app 界面 → 主窗口出现 → **再点一次标题栏 logo** → **桌宠消失、主窗口留下**；菜单里「退出桌宠」→ **桌宠消失、app 收进托盘、托盘区出现图标**（2026-09-11 改的，**不再把主窗口弹出来**；主窗口本来就露着的话它原样留着不动）；「退出 app」→ **整个进程退出**（任务管理器里没有残留）。
 
 **隐藏到托盘（第四轮 review）**：菜单点「隐藏桌宠」→ **桌宠从桌面消失**，托盘区（多半在「隐藏的图标」抽屉里）出现一个 app 图标，**图标看得见**（不是空白方块——空图标不抛异常，只能肉眼验）；**左键单击托盘图标** → 桌宠**原样回来**（位置、大小、正在播的动画都没变），**托盘图标随之消失**；再隐藏一次 → 托盘右键 → 三项齐全（显示桌宠 / 打开 app 界面 / 退出 app）；点「打开 app 界面」→ **主窗口出来，桌宠仍留在托盘里**；隐藏期间**标题栏那个 logo 显示成「未开启」**，点它 → **桌宠回来**（而不是彻底退掉）；隐藏状态下从托盘点「退出 app」→ **进程干净退出，托盘图标不残留**；隐藏后菜单不许留在展开态（再显示出来时精灵旁边不该挂一片透明区）。**dev 与打包后各验一遍**——托盘图标那两条候选路径是分别给这两种情形准备的。
 
 **置顶抢占（第四轮 review 的 bug，要真开一次会议软件）**：桌宠开着 → 用腾讯会议 / 飞书 / 钉钉**共享屏幕**，等那条置顶悬浮工具条出现 → 桌宠**最多两秒内自己回到最上层**，之后一直在上面；结束共享 → 桌宠仍在。顺带验两件事：抬回置顶的过程中**桌宠不抢焦点**（正在打字的窗口不会掉输入焦点）、**桌宠大小不变**（`moveTop()` 不动几何这条是探针量的，肉眼再确认一次）；桌宠躺在托盘里时**不该有任何动静**（守卫停了）。
 
-**两个窗口各关各的**（第二轮 review 推翻了原来的「主窗口关掉带走桌宠」）：桌宠开着时点主窗口的 ✕ / `Alt+F4` → **主窗口消失、桌宠还在原地照常用**；再从菜单「打开 app 界面」→ **主窗口原样回来**（不是重开一个空窗口，验的是 `hide()` 而非 destroy）；反过来 `Alt+F4` 打在桌宠上 → **退回主窗口**，且标题栏 logo 的状态跟着变（验 `stateChanged` 广播）；桌宠**没开**的时候关主窗口 → **进程照旧退出**。
+**两个窗口各关各的**（第二轮 review 推翻了原来的「主窗口关掉带走桌宠」）：桌宠开着时点主窗口的 ✕ / `Alt+F4` → **主窗口消失、桌宠还在原地照常用**；再从菜单「打开 app 界面」→ **主窗口原样回来**（不是重开一个空窗口，验的是 `hide()` 而非 destroy）；反过来 `Alt+F4` 打在桌宠上 → **桌宠退场、app 收进托盘**（2026-09-11 之前是「退回主窗口」），且标题栏 logo 的状态跟着变（验 `stateChanged` 广播）；桌宠**没开**的时候关主窗口 → **按「关闭主窗口时」那个设置走**（默认弹一次询问，见 [[app-close-tray]]）。
 
 **边界**：桌宠模式下**任务栏只有一个图标**；设置页改大小 / 换图 → **桌宠立刻变，且是刚改的那张**（不是上一次那张——那是 bug 1，验 `flushAppState` 排在广播之前）；150% 缩放下再走一遍拖拽与右下角停靠；`can('desktop-pet')` 关掉时标题栏**是纯 logo 而不是点不动的按钮**；DevTools 控制台**没有 CSP 报错**（验「不动 CSP」）；透明窗口有没有阴影矩形边 / 重绘残影（`hasShadow:false` 已经是为这个下的，真有残影就退 `transparent:false`）。
 
@@ -581,4 +582,4 @@ function startTopmostGuard(): void {
 - **26c live2d**：先探针再选型。要量：包体、是否需要 CDN（本仓库 CSP 禁）、能不能跑在 pixi v8 上（`pixi-live2d-display` 主流版本钉的是 pixi v6/v7，**很可能与现有 v8 冲突**，这是最大未知数）。
 - **26d 桌宠 AI + 待机对话**：复用主进程整套 AI 栈（`runChat` / 13 个工具，**一行不改**，见 [[ai-tools]]）；**桌宠的内置 prompt 必须进 `electron/shared/prompts.ts`**——那是 #23 review 拍的「全仓库唯一出处」，加具名常量，不许在调用点内联。AI 头像同样走 `data:`。
 
-相关：[[ai-chat]]（独立窗口那套模式的第一个使用者，`focusHostSettings` 已抽成共用）、[[ipc-contract]]（`{code,data,message}` 与纯对象铁律）、[[app-storage]]（两层存储与命名空间）、[[home-page]]（首页入口）、[[theme-system]]（配色：紫色留给 AI 入口，桌宠入口用中性面板色）、[[spine-preview]]（26b 要复用的渲染器）。
+相关：[[ai-chat]]（独立窗口那套模式的第一个使用者，`focusHostSettings` 已抽成共用）、[[app-close-tray]]（托盘泛化到 `main/tray.ts` 之后的 owner 规则、主窗口三态关闭行为、「退出桌宠 = 收进托盘」）、[[ipc-contract]]（`{code,data,message}` 与纯对象铁律）、[[app-storage]]（两层存储与命名空间）、[[home-page]]（首页入口）、[[theme-system]]（配色：紫色留给 AI 入口，桌宠入口用中性面板色）、[[spine-preview]]（26b 要复用的渲染器）。

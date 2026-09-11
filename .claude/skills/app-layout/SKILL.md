@@ -28,8 +28,8 @@ description: Toolbox 整体布局——无边框自绘窗控、顶部栏、左�
 - `src/views/HomeView.vue`、`PlaceholderView.vue`（读 `route.meta.title`）。
 - `src/components/layout/`：
   - `TitleBar.vue` — logo + 搜索框 + 窗控按钮；整条 `-webkit-app-region: drag`，交互控件 `no-drag`。
-  - `SideNav.vue` — `n-menu` 由 NAV_ITEMS 驱动，settings/about 固定底部；`activeKey` 取 `route.meta.navKey`，选中跳路由。
-  - `AppLayout.vue` — 组装 TitleBar + SideNav + `<router-view>` 内容区。
+  - `SideNav.vue` — `n-menu` 由 NAV_ITEMS 驱动，底部固定 `footerOptions`：**「AI 助手」→ 设置 → 关于**（AI 那行 2026-09-11 从首页卡片挪来，排在「设置」上面就是需求本身，有金丝雀比下标；紫色 Sparkles + 未配置时 `extra` 一个小圆点，`handleSelect` 里 `key === 'ai'` 直接开 AI 窗口并 return，不进 `keyToPath` ⇒ 高亮不粘）。`activeKey` 取 `route.meta.navKey`，选中跳路由。
+  - `AppLayout.vue` — 组装 TitleBar + SideNav + `<router-view>` 内容区；**全局弹窗挂在这里**（`CloseConfirmModal`，`onMounted` 里 `onClosePrompt(...)` 订阅、`onUnmounted` 退订，同 `onAiNavigateSettings` 那段写法）。
 - `src/App.vue` — `n-config-provider`(主题+zhCN locale) + message/dialog provider 包裹 `AppLayout`。
 
 ## 关键约定 / 注意
@@ -39,12 +39,14 @@ description: Toolbox 整体布局——无边框自绘窗控、顶部栏、左�
 - **通道名勿硬编码**：统一从 `electron/shared/channels.ts` 引用，main/preload 两侧一致。
 - **新增页面流程**：① 在 `NAV_ITEMS` 加项（带 path）② 路由自动生成占位 ③ 开发时把该 path 的 component 换成真实页面。
 - `route.meta.navKey` 是导航高亮与占位标题的依据，新路由需带上 `meta.title` + `meta.navKey`。
+- **naive-ui 弹窗的宽度只能写内联 `style`**，`<style scoped>` 里的 `.xxx { width }` 对 `n-modal preset="card"` 的根节点**一条都匹配不上**（`class` 被 `$attrs` 转发给内部 `h()` 出来的 `NCard`，那节点没有本组件的 `data-v-*`）；插槽内容不受影响。详见 [[app-close-tray]]。
 
 ## 边界 / 后续
 
 - 顶部搜索框目前仅 UI，搜索逻辑后续接入。
 - 账号入口（头像/登录）UI 归入账号骨架任务；设置/关于页为占位（设置页 P0-5、账号骨架 P0 末）。
 - 无边框窗口在 Windows 下自绘窗控；macOS 若需红绿灯位后续再适配。
+- 标题栏 ✕ **不再等于退进程**：`win.close()` 被主进程的 `close` 拦截器按「关闭行为」设置分流（每次询问 / 退出 / 收进托盘），见 [[app-close-tray]]。
 
 ## 验证
 

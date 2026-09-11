@@ -1,6 +1,6 @@
 ---
 name: ai-chat
-description: Toolbox AI 对话（#23a）——Vercel AI SDK **钉死 ai@6**（ai@7 要 Node≥22，Electron 33 只有 Node 20.18.3）、四个包覆盖九个厂商、多配置 + 设置页单选列表 + 首页入口 + **独立的无边框 BrowserWindow**（流式 / 传图 / 多会话 / 命名 / 取消 / 置顶 / 最小化）；记「key 在 userData 而配置在 dataDir」「SDK 按 model id 分支」「`SharedV3Warning` 只有三种真实形状」「面板形态三连反转」「分片必须按 event.sender 推」「窗控只有关闭有 DOM API，置顶与最小化各走一条专用通道」等实测边界。工具调用见 [[ai-tools]]，markdown 渲染见 [[ai-markdown]]
+description: Toolbox AI 对话（#23a）——Vercel AI SDK **钉死 ai@6**（ai@7 要 Node≥22，Electron 33 只有 Node 20.18.3）、四个包覆盖九个厂商、多配置 + 设置页单选列表 + **侧栏「AI 助手」入口**（2026-09-11 从首页卡片挪来）+ **独立的无边框 BrowserWindow**（流式 / 传图 / 多会话 / 命名 / 取消 / 置顶 / 最小化）；记「key 在 userData 而配置在 dataDir」「SDK 按 model id 分支」「`SharedV3Warning` 只有三种真实形状」「面板形态三连反转」「分片必须按 event.sender 推」「窗控只有关闭有 DOM API，置顶与最小化各走一条专用通道」等实测边界。工具调用见 [[ai-tools]]，markdown 渲染见 [[ai-markdown]]
 ---
 
 # AI 对话（#23a）
@@ -120,7 +120,7 @@ review 提「ai 的 prompt 要统一维护才行，后续还有不同的 prompt�
 - **对话窗口是独立进程视图，只有它挂 `aiChat` store**；主窗口只订阅一条 `ai:navigateSettings` 推送（AI 窗口的 ⚙ → 主窗口 `router.push('/settings')`）。任何入口只要 `openAiWindowApi()`。
 - **关窗口 = 渲染进程没了 → 主进程按 sender 销毁取消请求**。这条与第一轮的「关面板不取消请求」是同一个需求的两种形态下的答案，见「形态三连反转」。
 - **分片按 requestId 找目标消息，不往「当前会话」写**：用户完全可能生成中途切会话。`pending: requestId → {conversationId, messageId}`，两路并发各归各家；会话被删掉则分片丢弃且不抛错。
-- 首页入口：`.home__usage-card`（「已使用 N 次」）整块换成 `.home__ai-entry`。**信息没丢**——总次数在下方「使用统计」环形图中心还有一份。副标题在没配置时直接说「去设置页添加配置」，别让用户点进去才发现。紫色只在那个 44px 圆形图标上作强调（[[toolbox-color-scheme]]），外面包 `can('ai-chat')`（tier 表没这 key → 默认 free 放行，将来收费只需在 `NAV_ITEMS` 登记，见 [[toolbox-entitlement-pattern]]）。
+- 入口（**2026-09-11 挪了位置**）：现在是**侧栏底部「设置」上面那一行**「AI 助手」（紫色 Sparkles 图标，未配置时右边一个小圆点），点它 `openAiWindowApi()`。**首页那块 `.home__ai-entry` 卡片已整块删掉**，全 app 只留这一个入口（用户原话「ai 入口放在设置 tab 上面」，见 [[app-close-tray]]）。它原来的历史是：`.home__usage-card`（「已使用 N 次」）整块换成 `.home__ai-entry`，**信息没丢**——总次数在首页「使用统计」环形图中心还有一份。外面仍然包 `can('ai-chat')`（tier 表没这 key → 默认 free 放行，将来收费只需在 `NAV_ITEMS` 登记，见 [[toolbox-entitlement-pattern]]）；紫色只作强调（[[toolbox-color-scheme]]）。
 - **出错的助手消息不进下一轮上下文**（否则把错误当成模型说过的话），空的助手占位也不下发。
 - **助手消息渲染全量 markdown**（#23c 起）：`marked` 只用 lexer → 纯对象节点树 → `h()`，零 `v-html`，见 [[ai-markdown]]。**用户消息仍是 `white-space: pre-wrap` 纯文本**（自己打的 `*` `#` 缩进多半是字面意思），`reasoning` 与工具卡片同理。`markdownLite.ts` / `splitCodeBlocks` 已删，取代它的是 `src/utils/markdown.ts`；未闭合围栏 `open:true`（流式常态，界面据此不高亮也不给复制按钮）这条语义原封不动搬了过去。
 - 两个 store 分开：`aiConfig`（配置 + key 状态）/ `aiChat`（会话 + 流）。**下发前重建纯对象**（`{...config}`、`JSON.parse(JSON.stringify(conversations))`）——见 [[ipc-contract]]，本仓库已踩五次。
@@ -152,7 +152,7 @@ review 提「ai 的 prompt 要统一维护才行，后续还有不同的 prompt�
 - **顶栏 `-webkit-app-region: drag`，所有按钮与下拉 `no-drag`**（不加就点不动）。按钮：`会话下拉 ▾ / ✎ / ＋ / 🗑 / ⚙ / 📌 置顶 / ─ 最小化 / ✕ 关闭`——三个窗控，**没有「贴回」**（那个形态根本不存在，见上表）。最小化是第四轮 review 用户加的（「ai对话框加个最小化按钮」，2026-09-04），排在 ✕ 左边跟 Windows 一个顺序。
 - **顶栏必须留一块空白给拖拽**（第三轮 review 的第 1 条）：会话下拉原来是 `flex: 1 1 0`，把顶栏铺满后只剩按钮之间的缝可以按，**窗口基本拖不动**。现在下拉是 `flex: 0 1 140px`（窄窗口下自己先让位），后面跟一个 `.ai-window__drag`（`flex: 1 1 auto; min-width: 32px`）——那个 div **不能标 `no-drag`**，它的整个用途就是当把手。加了最小化之后顶栏是**八个**元素，`min-width: 32px` 从「保险」变成**保命的那一条**：按钮不缩、下拉缩到 0 之后，那 32px 就是 320px 最窄宽度下唯一还能按住拖动的地方。重命名输入框与下拉同宽，切换时布局不跳。
 - **下拉一窄，选项菜单也跟着窄，所以要 `:consistent-menu-width="false"`**：naive-ui 默认让弹层与触发器同宽，会话标签是 `标题 · 相对时间 · N 条`、配置标签是 `名称 · 模型`，140px 的触发器会把菜单里的选项也截断成认不出来。触发器窄 + 菜单按内容宽才是对的。输入框上方那两个下拉同理不撑满（`152px` + `106px`，右边留白）。
-- **这个窗口里 `window.api.window.*` 控的是主窗口**（`registerWindowControlIpc(mainWindow)` 是闭包），所以绝不能用 `useWindowControls`——在这儿调 `minimize()` 会把整个 app 收进任务栏。三个窗控各走各的：**关闭是唯一有 DOM API 的**（`window.close()`，不用过 IPC）；置顶走 `ai:setWindowTop`；**最小化走 `ai:minimizeWindow`**，因为 DOM 的 `window` 压根没有 minimize。收起来之后从任务栏点回来，或者再点一次首页 AI 入口（`openPanelWindow` 本来就先 `isMinimized() → restore()`，所以不会开出第二个窗口）。
+- **这个窗口里 `window.api.window.*` 控的是主窗口**（`registerWindowControlIpc(mainWindow)` 是闭包），所以绝不能用 `useWindowControls`——在这儿调 `minimize()` 会把整个 app 收进任务栏。三个窗控各走各的：**关闭是唯一有 DOM API 的**（`window.close()`，不用过 IPC）；置顶走 `ai:setWindowTop`；**最小化走 `ai:minimizeWindow`**，因为 DOM 的 `window` 压根没有 minimize。收起来之后从任务栏点回来，或者再点一次侧栏那个「AI 助手」（`openPanelWindow` 本来就先 `isMinimized() → restore()`，所以不会开出第二个窗口）。
 - **最小化不会把窗口位置写坏，不需要额外守卫**（真 Electron 探针量的，Windows + frameless + transparent）：最小化期间 `getBounds()` 回的仍是**还原后的**位置（Win32 那个 `-32000` 被 Electron 兜住了），而且最小化只触发 `move` 与 `minimize`，**不触发我们落盘用的 `moved` / `resized`** —— 于是它压根不会排一次写盘。**这条是先量后写的**：本来准备加一个「最小化时跳过 scheduleSave」的守卫，量完发现现有的 `moved`/`resized` 选择已经把这件事挡住了，就没加那段投机代码。
 - ⚙ 是**跨窗口跳转**：`ai:openSettings` → 主进程聚焦主窗口 → 推 `ai:navigateSettings` → 主窗口 `router.push('/settings')`。所以 `navigateSettings` **是推送通道、不注册 invoke handler**（有断言守这条）。改完配置切回 AI 窗口，`window.focus` 里 `refreshAppState()` + `aiConfig.hydrate()` 重读磁盘——**不 hydrate 这边就一直停在打开时那份**。
 - `host.on('closed')` → 销毁 AI 窗口。少这条，关掉主窗口后 `window-all-closed` 不触发，进程会剩一个 AI 窗口挂着不退。
@@ -233,7 +233,7 @@ ai 565 项 / @ai-sdk/anthropic 56 / openai 84 / google 71 / openai-compatible 48
 
 打包本身在本机踩了 [[app-storage]] 已记过的那条：`rename win-unpacked.tmp -> win-unpacked` 在仓库内的 `release/` 下必定 EPERM。这次量清了它**与内容有关而不是与目录有关**——同目录下同数量同体积的普通文件重命名成功，一放进 Electron 的 `.dll`/`.pak` 就 EPERM（`move` 报「拒绝访问」而 `rm -rf` 却成功，说明不是句柄占用）。除了已记的「输出到 `%TEMP%`」，第二条绕法是 **`-c.electronDist=node_modules/electron/dist`**：electron-builder 认「已解包的 Electron 目录」，走复制而不是解压+改名，输出可以留在仓库内。
 
-**人工验，本机做得了的（不需要真 key）**：首页点 AI 入口 → 独立窗口在主窗口右侧开出、宽窄与高度跟以前的面板一致 → 拖顶栏能移动、**拖到第二块屏幕**、拖边角能缩放（最小 320×360，**留意透明窗口缩放时有没有重绘残影**，真有就退回 `transparent:false` + 直角）→ 📌 置顶后覆盖住其他程序 → **点 ─ 只收起 AI 窗口、主窗口一动不动**（这条最容易写错，写错就是整个 app 被收进任务栏），任务栏点回来位置尺寸与置顶状态都没变、再点一次首页 AI 入口也能唤回且不会开出第二个窗口，**还原后透明窗口没有重绘残影、圆角还在**，关掉重开位置仍是最小化之前那份（验「最小化不写盘」）→ 关掉再开，位置尺寸与置顶状态都还在 → 主窗口切工具页 / 最大化都不影响它 → ⚙ 让主窗口跳到设置页、在那儿改完配置切回 AI 窗口，配置已刷新 → ✕ 关掉窗口，会话已落盘（重开还在）→ **关主窗口时 AI 窗口一起消失、进程退出** → 在 150% 缩放的屏幕上再走一遍（bounds 是 DIP，位置不许偏）→ **缩到 320px 最窄宽度，八个顶栏元素挤在一起时仍有地方能按住拖动**（下拉先让位，`.ai-window__drag` 那 32px 是保底）→ 输入框左边是图片图标而不是「图片」二字。
+**人工验，本机做得了的（不需要真 key）**：侧栏点「AI 助手」→ 独立窗口在主窗口右侧开出、宽窄与高度跟以前的面板一致 → 拖顶栏能移动、**拖到第二块屏幕**、拖边角能缩放（最小 320×360，**留意透明窗口缩放时有没有重绘残影**，真有就退回 `transparent:false` + 直角）→ 📌 置顶后覆盖住其他程序 → **点 ─ 只收起 AI 窗口、主窗口一动不动**（这条最容易写错，写错就是整个 app 被收进任务栏），任务栏点回来位置尺寸与置顶状态都没变、再点一次侧栏的「AI 助手」也能唤回且不会开出第二个窗口，**还原后透明窗口没有重绘残影、圆角还在**，关掉重开位置仍是最小化之前那份（验「最小化不写盘」）→ 关掉再开，位置尺寸与置顶状态都还在 → 主窗口切工具页 / 最大化都不影响它 → ⚙ 让主窗口跳到设置页、在那儿改完配置切回 AI 窗口，配置已刷新 → ✕ 关掉窗口，会话已落盘（重开还在）→ **关主窗口时 AI 窗口一起消失、进程退出** → 在 150% 缩放的屏幕上再走一遍（bounds 是 DIP，位置不许偏）→ **缩到 320px 最窄宽度，八个顶栏元素挤在一起时仍有地方能按住拖动**（下拉先让位，`.ai-window__drag` 那 32px 是保底）→ 输入框左边是图片图标而不是「图片」二字。
 
 **人工验，需要用户真 key（本机做不了）**：配一个厂商 → 测试连接通过 → 对话**逐字流出**而非一次性蹦出（这条就是在验 `event.sender` 那处改动）→ 中途取消立刻停 → **生成中直接关掉窗口，主进程侧请求被取消**（不再空烧 token）→ vision 模型认出图片 / 非 vision 上传禁用 → **重启后配置/会话/图片都在** → `app-state.json` 里搜不到 API Key → 顶部下拉切会话、生成中切走再切回内容没串到别的会话 → ✎ 改名后发新消息标题不被改掉 → 长回复只在消息区滚动不超框 → `claude-opus-4-8` 的 temperature 告警显示成一句中文 → 配置的编辑/复制/删除走弹窗、取消不留痕、复制出来的不用重填 key。
 

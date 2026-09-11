@@ -1538,7 +1538,8 @@ eq(
   // 2. **`quitting` 的判断必须排在 preventDefault 之前。** `app.quit()` 会给每个窗口发
   //    `close`，拦截器一 preventDefault 就把退出吃掉了——托盘的「退出 app」、桌宠菜单的
   //    「退出 app」全压在这条顺序上（`quitAppFromPet` 早踩过一次同样的坑）。
-  const closeHandler = /window\.on\('close', \(event\) => \{[\s\S]*?\n {2}\}\)/.exec(appClose)?.[0] ?? '';
+  const closeHandler =
+    /window\.on\('close', \(event\) => \{[\s\S]*?\n {2}\}\)/.exec(appClose)?.[0] ?? '';
   eq(closeHandler.length > 0, true, '找得到主窗口的 close 处理器（找不到说明结构变了）');
   const quittingAt = closeHandler.indexOf('if (quitting) return');
   const preventAt = closeHandler.indexOf('preventDefault()');
@@ -1575,7 +1576,11 @@ eq(
     true,
     '托盘建起来了才 hide() 主窗口（反了 = 藏进一个没有出口的地方，用户只剩任务管理器）',
   );
-  eq(hideHost.includes('return false'), true, '托盘建不起来时 hideHostToTray 回 false（调用方据此保留窗口）');
+  eq(
+    hideHost.includes('return false'),
+    true,
+    '托盘建不起来时 hideHostToTray 回 false（调用方据此保留窗口）',
+  );
   // 「两个托盘永不共存」这个结论的前提：主窗口那份托盘菜单里**不许**有通往桌宠的入口。
   // 认 `label:` 那个字面量而不是裸的「打开桌宠」——函数体里那段注释正解释着「为什么不放」，
   // 拿裸串去 includes 只会一直命中注释（这条哨兵第一次跑就是这么红的）
@@ -1616,7 +1621,8 @@ eq(
   );
 
   // 7. **AI 入口排在「设置」上面**（用户原话「ai 入口放在设置 tab 上面」——顺序就是需求本身）。
-  const footer = /const footerOptions = computed<MenuOption\[\]>\([\s\S]*?\n\}\);/.exec(sideNav)?.[0] ?? '';
+  const footer =
+    /const footerOptions = computed<MenuOption\[\]>\([\s\S]*?\n\}\);/.exec(sideNav)?.[0] ?? '';
   eq(footer.length > 0, true, '找得到侧栏底部那组菜单项（找不到说明结构变了）');
   const aiKeyAt = footer.indexOf("key: 'ai'");
   const settingsKeyAt = footer.indexOf("key: 'settings'");

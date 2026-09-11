@@ -91,8 +91,7 @@ const footerOptions = computed<MenuOption[]>(() => {
       label: 'AI 助手',
       icon: () =>
         h(NIcon, { color: 'var(--tb-color-primary)' }, { default: () => h(SparklesOutline) }),
-      extra:
-        aiConfig.configs.length === 0 ? () => h('span', { style: DOT_STYLE }) : undefined,
+      extra: aiConfig.configs.length === 0 ? () => h('span', { style: DOT_STYLE }) : undefined,
     });
   }
   options.push(
