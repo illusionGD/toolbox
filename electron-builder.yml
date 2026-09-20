@@ -15,6 +15,8 @@ asarUnpack:
   # cn-font-split 走 koffi FFI 调用下载来的 libffi .dll；两者都是原生二进制，须解包
   - node_modules/cn-font-split/**
   - node_modules/koffi/**
+  # Playwright 包含浏览器辅助进程资源，须从真实文件系统读取。
+  - node_modules/playwright-core/**
 win:
   icon: build/icon.png
   target:

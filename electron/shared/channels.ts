@@ -352,3 +352,18 @@ export const APP_STATE_CHANNELS = {
   /** 按命名空间合并写入（防抖后调用）。 */
   write: 'appState:write',
 } as const;
+
+/** 网页测试的请求与状态推送通道。 */
+export const WEBTEST_CHANNELS = {
+  snapshot: 'webtest:snapshot',
+  videos: 'webtest:videos',
+  saveVideo: 'webtest:saveVideo',
+  deleteVideo: 'webtest:deleteVideo',
+  record: 'webtest:record',
+  replay: 'webtest:replay',
+  stop: 'webtest:stop',
+  update: 'webtest:update',
+  import: 'webtest:import',
+  export: 'webtest:export',
+  changed: 'webtest:changed',
+} as const;

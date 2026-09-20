@@ -58,6 +58,11 @@ export function allowMediaPath(filePath: string): void {
   allowedPaths.add(normalizeKey(filePath));
 }
 
+/** @param filePath 已删除文件的绝对路径，撤销对应播放权限。 */
+export function revokeMediaPath(filePath: string): void {
+  allowedPaths.delete(normalizeKey(filePath));
+}
+
 /**
  * 生成渲染进程可用的播放 URL。
  * @param filePath 绝对路径。

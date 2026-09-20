@@ -67,7 +67,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: GlobeOutline,
     children: [{ key: 'network-host', label: 'Host 工具', path: '/network/host' }],
   },
-  { key: 'dev', label: '开发工具', icon: CodeSlashOutline, path: '/dev' },
+  {
+    key: 'dev',
+    label: '开发工具',
+    icon: CodeSlashOutline,
+    children: [{ key: 'dev-webtest', label: '网页自动化测试', path: '/dev/webtest' }],
+  },
   { key: 'system', label: '系统工具', icon: BuildOutline, path: '/system' },
   { key: 'more', label: '更多工具', icon: AppsOutline, path: '/more' },
 ];

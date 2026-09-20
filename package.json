@@ -29,6 +29,8 @@
     "lint": "eslint . --fix",
     "format": "prettier --write .",
     "verify:ai": "node scripts/tbverify/run.cjs",
+    "verify:webtest": "node scripts/tbverify/run-webtest.cjs",
+    "verify:webtest:ui": "node scripts/tbverify/webtest-ui-review.cjs",
     "commit": "git add . && git-cz",
     "push": "npm run commit && git push --follow-tags"
   },
@@ -59,6 +61,7 @@
     "naive-ui": "^2.44.1",
     "pinia": "^4.0.2",
     "pixi.js": "^8.19.0",
+    "playwright-core": "1.63.0",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.3",
     "subset-font": "^2.5.0",

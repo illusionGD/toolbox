@@ -36,30 +36,37 @@
 
       <div v-if="streaming && !message.text" class="ai-msg__typing">正在生成…</div>
 
-      <div
-        v-for="call in message.toolCalls ?? []"
-        :key="call.callId"
-        class="ai-msg__tool"
-        :class="`ai-msg__tool--${call.status}`"
-      >
-        <div class="ai-msg__tool-head">
-          <span class="ai-msg__tool-dot" />
-          <span class="ai-msg__tool-name">{{ call.name }}</span>
-          <span class="ai-msg__tool-status">{{ STATUS_LABEL[call.status] }}</span>
-          <span v-if="call.elapsed" class="ai-msg__tool-elapsed">
-            {{ formatElapsed(call.elapsed) }}
-          </span>
+      <!-- 整组调用默认折叠；流式追加调用或更新状态时保留用户的展开选择。 -->
+      <details v-if="message.toolCalls?.length" class="ai-msg__tools">
+        <summary class="ai-msg__tools-head">
+          <span>工具调用（{{ message.toolCalls.length }}）</span>
+          <span v-if="hasPendingToolCalls" class="ai-msg__tools-pending">待确认 · 展开处理</span>
+        </summary>
+        <div
+          v-for="call in message.toolCalls"
+          :key="call.callId"
+          class="ai-msg__tool"
+          :class="`ai-msg__tool--${call.status}`"
+        >
+          <div class="ai-msg__tool-head">
+            <span class="ai-msg__tool-dot" />
+            <span class="ai-msg__tool-name">{{ call.name }}</span>
+            <span class="ai-msg__tool-status">{{ STATUS_LABEL[call.status] }}</span>
+            <span v-if="call.elapsed" class="ai-msg__tool-elapsed">
+              {{ formatElapsed(call.elapsed) }}
+            </span>
+          </div>
+          <div class="ai-msg__tool-summary">{{ call.summary }}</div>
+          <div v-if="call.result" class="ai-msg__tool-result">{{ call.result }}</div>
+          <!-- 只有 pending 才有按钮：其余状态那边的 promise 已经落定，点了没人接 -->
+          <div v-if="call.status === 'pending'" class="ai-msg__tool-actions">
+            <n-button size="tiny" type="primary" @click="chat.approveTool(call.callId)"
+              >允许</n-button
+            >
+            <n-button size="tiny" quaternary @click="chat.denyTool(call.callId)">拒绝</n-button>
+          </div>
         </div>
-        <div class="ai-msg__tool-summary">{{ call.summary }}</div>
-        <div v-if="call.result" class="ai-msg__tool-result">{{ call.result }}</div>
-        <!-- 只有 pending 才有按钮：其余状态那边的 promise 已经落定，点了没人接 -->
-        <div v-if="call.status === 'pending'" class="ai-msg__tool-actions">
-          <n-button size="tiny" type="primary" @click="chat.approveTool(call.callId)"
-            >允许</n-button
-          >
-          <n-button size="tiny" quaternary @click="chat.denyTool(call.callId)">拒绝</n-button>
-        </div>
-      </div>
+      </details>
 
       <div v-for="(warning, index) in message.warnings ?? []" :key="index" class="ai-msg__warning">
         {{ warning }}
@@ -72,6 +79,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import { NButton, NCollapse, NCollapseItem } from 'naive-ui';
 import type { AiMessage, AiToolCall } from '@shared/types';
 import AiMarkdown from './AiMarkdown.vue';
@@ -86,7 +94,7 @@ interface Props {
   streaming?: boolean;
 }
 
-withDefaults(defineProps<Props>(), { streaming: false });
+const props = withDefaults(defineProps<Props>(), { streaming: false });
 
 /** 工具调用状态的中文标签。 */
 const STATUS_LABEL: Record<AiToolCall['status'], string> = {
@@ -110,6 +118,10 @@ const chat = useAiChatStore();
  * 助手头像。**整个窗口共用一个 ref**（见 useAiAvatar），所以一屏几十条消息只读一次盘。
  */
 const avatar = useAiAvatar();
+/** 折叠时仍提示待确认操作，避免用户错过工具的确认请求。 */
+const hasPendingToolCalls = computed(() =>
+  props.message.toolCalls?.some((call) => call.status === 'pending'),
+);
 // #endregion
 
 /**
@@ -217,6 +229,49 @@ function formatElapsed(ms: number): string {
     background: var(--tb-bg-elevated);
   }
 
+  &__tools {
+    margin-top: var(--tb-space-2);
+  }
+
+  &__tools-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--tb-space-2);
+    padding: var(--tb-space-2);
+    color: var(--tb-text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    list-style: none;
+    border: 1px solid var(--tb-border);
+    border-radius: var(--tb-radius-sm);
+    background: var(--tb-bg-elevated);
+
+    &::-webkit-details-marker {
+      display: none;
+    }
+
+    &::before {
+      content: '▸';
+      flex-shrink: 0;
+      color: var(--tb-text-secondary);
+      font-size: 12px;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--tb-color-primary);
+      outline-offset: 2px;
+    }
+  }
+
+  &__tools[open] > &__tools-head::before {
+    transform: rotate(90deg);
+  }
+
+  &__tools-pending {
+    color: var(--tb-text-primary);
+  }
+
   &__tool-head {
     display: flex;
     align-items: center;
@@ -232,6 +287,7 @@ function formatElapsed(ms: number): string {
   }
 
   &__tool-name {
+    min-width: 0;
     color: var(--tb-text-primary);
     font-size: 12px;
     font-family: var(--tb-font-mono, monospace);
@@ -240,6 +296,8 @@ function formatElapsed(ms: number): string {
 
   &__tool-status,
   &__tool-elapsed {
+    flex-shrink: 0;
+    white-space: nowrap;
     color: var(--tb-text-secondary);
     font-size: 12px;
   }

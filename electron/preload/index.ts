@@ -15,6 +15,7 @@ import {
   STORAGE_CHANNELS,
   VIDEO_CHANNELS,
   WINDOW_CHANNELS,
+  WEBTEST_CHANNELS,
 } from '../shared/channels';
 import type {
   AiChatRequest,
@@ -95,9 +96,43 @@ import type {
 } from '../shared/types';
 import type { PetRect } from '../shared/petWindow';
 import type { AppCloseAction, AppCloseChoice } from '../shared/appWindow';
+import type {
+  WebTestFlow,
+  WebTestFormat,
+  WebTestRecordOptions,
+  WebTestReplayOptions,
+  WebTestSnapshot,
+  WebTestVideo,
+} from '../shared/webtest';
 
 /** 暴露给渲染进程的自定义 API。 */
 const api = {
+  /** 网页测试：主进程持有浏览器和录制会话，事件返回退订函数。 */
+  webtest: {
+    snapshot: (): Promise<IpcResponse<WebTestSnapshot>> =>
+      ipcRenderer.invoke(WEBTEST_CHANNELS.snapshot),
+    videos: (): Promise<IpcResponse<WebTestVideo[]>> => ipcRenderer.invoke(WEBTEST_CHANNELS.videos),
+    saveVideo: (path: string): Promise<IpcResponse<string | null>> =>
+      ipcRenderer.invoke(WEBTEST_CHANNELS.saveVideo, path),
+    deleteVideo: (path: string): Promise<IpcResponse<void>> =>
+      ipcRenderer.invoke(WEBTEST_CHANNELS.deleteVideo, path),
+    record: (options: WebTestRecordOptions): Promise<IpcResponse<WebTestSnapshot>> =>
+      ipcRenderer.invoke(WEBTEST_CHANNELS.record, options),
+    replay: (options: WebTestReplayOptions): Promise<IpcResponse<WebTestSnapshot>> =>
+      ipcRenderer.invoke(WEBTEST_CHANNELS.replay, options),
+    stop: (): Promise<IpcResponse<WebTestSnapshot>> => ipcRenderer.invoke(WEBTEST_CHANNELS.stop),
+    update: (flow: WebTestFlow): Promise<IpcResponse<WebTestSnapshot>> =>
+      ipcRenderer.invoke(WEBTEST_CHANNELS.update, flow),
+    import: (): Promise<IpcResponse<WebTestSnapshot | null>> =>
+      ipcRenderer.invoke(WEBTEST_CHANNELS.import),
+    export: (flow: WebTestFlow, format: WebTestFormat): Promise<IpcResponse<string | null>> =>
+      ipcRenderer.invoke(WEBTEST_CHANNELS.export, flow, format),
+    onChanged: (callback: (snapshot: WebTestSnapshot) => void): (() => void) => {
+      const listener = (_event: unknown, snapshot: WebTestSnapshot): void => callback(snapshot);
+      ipcRenderer.on(WEBTEST_CHANNELS.changed, listener);
+      return () => ipcRenderer.off(WEBTEST_CHANNELS.changed, listener);
+    },
+  },
   /**
    * 向主进程发送 ping，验证 IPC 通道连通。
    * @returns 主进程返回的 'pong' 字符串。

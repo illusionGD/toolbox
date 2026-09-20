@@ -22,6 +22,7 @@ import BitmapFontView from '@/views/font/BitmapFontView.vue';
 import SpinePreviewView from '@/views/media/SpinePreviewView.vue';
 import VideoView from '@/views/media/VideoView.vue';
 import AudioView from '@/views/media/AudioView.vue';
+import WebTestView from '@/views/dev/WebTestView.vue';
 
 /**
  * 已实现工具的 key → 页面组件映射。
@@ -43,6 +44,7 @@ const TOOL_COMPONENTS: Record<string, Component> = {
   'media-spine': SpinePreviewView,
   'media-video': VideoView,
   'media-audio': AudioView,
+  'dev-webtest': WebTestView,
 };
 
 /**
@@ -71,6 +73,7 @@ function buildToolRoutes(items: readonly NavItem[]): RouteRecordRaw[] {
 
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/home' },
+  { path: '/dev', redirect: '/dev/webtest' },
   { path: '/home', name: 'home', component: HomeView, meta: { title: '首页', navKey: 'home' } },
   ...buildToolRoutes(NAV_ITEMS),
   {

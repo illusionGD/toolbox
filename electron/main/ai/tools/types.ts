@@ -13,6 +13,8 @@ export interface ToolCtx {
   requestId: string;
   /** 本次请求的审批策略（跟着请求下发，不读 app-state）。 */
   mode: AiToolMode;
+  /** 取消对话时中止本轮启动的浏览器任务；旧调用方可省略。 */
+  signal?: AbortSignal;
   /** 把一条**完整的**工具记录推给渲染进程（同 callId 会来多次，那边按 callId upsert）。 */
   emit(call: AiToolCall): void;
   /**

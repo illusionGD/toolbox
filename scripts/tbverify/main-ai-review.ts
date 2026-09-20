@@ -612,9 +612,9 @@ eq(
 
 {
   const names = TOOLS.map((t) => t.name);
-  eq(names.length, 13, '工具总数 13 个');
-  eq(TOOLS.filter((t) => t.kind === 'read').length, 8, '只读工具 8 个');
-  eq(TOOLS.filter((t) => t.kind === 'write').length, 5, '写盘工具 5 个');
+  eq(names.length, 24, '通用工具 13 个 + 网页测试工具 11 个');
+  eq(TOOLS.filter((t) => t.kind === 'read').length, 13, '只读工具 13 个');
+  eq(TOOLS.filter((t) => t.kind === 'write').length, 11, '写操作工具 11 个');
   eq(new Set(names).size, names.length, '工具名不重复（重名会被后者顶掉，静默少一个能力）');
   deepEq(
     [...names].sort(),
@@ -631,9 +631,20 @@ eq(
       'read_text_file',
       'rename_files',
       'storage_info',
+      'webtest_export',
+      'webtest_import',
+      'webtest_inspect',
+      'webtest_patch_steps',
+      'webtest_read_steps',
+      'webtest_record',
+      'webtest_replay',
+      'webtest_status',
+      'webtest_stop',
+      'webtest_videos',
+      'webtest_wait',
       'write_text_file',
     ],
-    '工具清单与约定的 8 读 + 5 写完全一致',
+    '工具清单包含通用能力和网页测试能力',
   );
   // 硬规则：没有删除、没有 shell、没有网络抓取。加工具时手滑最容易破的就是这条
   eq(
@@ -643,7 +654,7 @@ eq(
   );
 
   const ask = probeTools('ask');
-  eq(Object.keys(ask.tools ?? {}).length, 13, 'ask 模式下 13 个工具都注册给了 SDK');
+  eq(Object.keys(ask.tools ?? {}).length, 24, 'ask 模式下 24 个工具都注册给了 SDK');
   eq(
     names.every((n) => typeof (ask.tools?.[n] as { execute?: unknown })?.execute === 'function'),
     true,
@@ -654,6 +665,24 @@ eq(
     'object',
     '工具带着 inputSchema 下发（SDK 靠它翻成各家的 JSON Schema）',
   );
+}
+
+// 只读工具：不确认、直接跑；返回值必须封顶
+{
+  const probe = probeTools('auto', 'req-webtest-deny');
+  const pending = callTool(probe.tools, 'webtest_patch_steps', {
+    expectedRevision: 0,
+    dryRun: false,
+    patches: [{ id: 'target', selector: 'button' }],
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  eq(probe.emitted[0]?.status, 'pending', 'AI 保存步骤修复在 auto 模式仍确认');
+  replyConfirm(probe.emitted[0]?.callId ?? '', false);
+  eq(((await pending) as { denied?: boolean }).denied, true, '拒绝步骤修复不进入共享会话');
+  const missing = (await callTool(probeTools('ask').tools, 'webtest_status', {})) as {
+    error?: string;
+  };
+  eq(typeof missing.error, 'string', '共享网页测试未初始化时返回可读错误而非另建会话');
 }
 
 // 只读工具：不确认、直接跑；返回值必须封顶

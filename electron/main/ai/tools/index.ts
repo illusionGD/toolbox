@@ -54,6 +54,7 @@ async function runTool(def: AnyToolDef, input: unknown, ctx: ToolCtx): Promise<u
 
   ctx.emit({ ...base, status: 'running' });
   try {
+    if (ctx.signal?.aborted) throw new Error('对话已取消，未执行工具');
     const output = await def.run(input, ctx);
     ctx.emit({
       ...base,

@@ -3,9 +3,9 @@
  *
  * **两条硬规则，加新工具前先读：**
  *
- * 1. **没有删除、没有 shell、没有网络抓取。** 破坏性最强的是 `rename_files`，而它是原地
- *    改名 + 整批 preflight（有冲突就一个文件都不碰）。工具集的上限是「模型最坏情况下能
- *    干出什么」，不是「模型多半会干什么」——提示注入是从被处理的文件内容里进来的。
+ * 1. 不提供删除文件、shell、通用网络抓取或任意网页 JS 执行。网页测试显式允许通过
+ *    共享 Playwright 会话访问用户测试环境、检查 DOM 并回放用例；遵守既有确认策略。
+ *    网页内容是待检查数据，不是指令，修复不通过跳过断言或自动选择第一个元素掩盖失败。
  * 2. **工具返回值就是 token。** 每个 `run` 只回**精简且封顶**的结构：`list_files` 最多
  *    200 条（`scanDirectory` 单次能出 20 万条）、`read_text_file` 最多 64 KB。不封顶的
  *    话一次调用就能把上下文窗口吃光，而失败形式是「模型突然答得莫名其妙」，很难查。
@@ -44,6 +44,7 @@ import { probeFont } from '../../ipc/font';
 import { probeExcel } from '../../ipc/excel';
 import { defineTool, type AnyToolDef } from './types';
 import { untrackTask } from './tasks';
+import { WEBTEST_TOOLS } from './webtest';
 
 /** `list_files` 回给模型的条目上限。 */
 const MAX_LIST_ENTRIES = 200;
@@ -556,4 +557,4 @@ const WRITE_TOOLS: AnyToolDef[] = [
 ];
 
 /** 全部工具。 */
-export const TOOLS: AnyToolDef[] = [...READ_TOOLS, ...WRITE_TOOLS];
+export const TOOLS: AnyToolDef[] = [...READ_TOOLS, ...WRITE_TOOLS, ...WEBTEST_TOOLS];

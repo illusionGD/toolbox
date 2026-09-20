@@ -15,6 +15,7 @@ import { registerStorageIpc } from './ipc/storage';
 import { registerAiIpc } from './ipc/ai';
 import { registerPetIpc } from './ipc/pet';
 import { registerAppCloseIpc } from './ipc/appClose';
+import { registerWebTestIpc } from './ipc/webtest';
 import { initPanelWindow } from './ai/panelWindow';
 import { initPetWindow, restorePetWindow } from './pet/petWindow';
 import { initAppClose } from './appClose';
@@ -66,6 +67,7 @@ function createWindow(): void {
   registerAiIpc();
   registerPetIpc();
   registerAppCloseIpc();
+  registerWebTestIpc(mainWindow);
   // 主窗口的引用两个子窗口都要摸（AI 窗口跳设置页、桌宠把它藏起来再拿回来），存一处
   initWindowNav(mainWindow);
   // AI 对话是独立窗口：把主窗口交给它当宿主（默认位置 + 设置页跳转 + 跟着一起关）

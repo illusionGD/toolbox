@@ -243,6 +243,7 @@ export async function runChat(
     );
 
     const tools = buildTools({
+      signal: controller.signal,
       requestId: request.requestId,
       mode: request.toolMode,
       // 工具事件搭现成的流式通道走：渲染进程那边一处订阅就全收了
