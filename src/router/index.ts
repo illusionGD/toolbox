@@ -13,6 +13,7 @@ import ImageStylizeView from '@/views/image/ImageStylizeView.vue';
 import ImageSpriteView from '@/views/image/ImageSpriteView.vue';
 import QrCodeView from '@/views/image/QrCodeView.vue';
 import FileStatsView from '@/views/file/FileStatsView.vue';
+import FileDiffView from '@/views/file/FileDiffView.vue';
 import RenameView from '@/views/file/RenameView.vue';
 import ExcelI18nView from '@/views/file/ExcelI18nView.vue';
 import FontSubsetView from '@/views/font/FontSubsetView.vue';
@@ -35,6 +36,7 @@ const TOOL_COMPONENTS: Record<string, Component> = {
   'image-sprite': ImageSpriteView,
   'image-qrcode': QrCodeView,
   'file-stats': FileStatsView,
+  'file-diff': FileDiffView,
   'file-rename': RenameView,
   'file-excel-i18n': ExcelI18nView,
   'font-subset': FontSubsetView,

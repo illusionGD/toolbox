@@ -61,6 +61,14 @@ export const FILE_CHANNELS = {
   renameBatch: 'file:renameBatch',
 } as const;
 
+/** 文件/目录内容对比通道。 */
+export const FILE_DIFF_CHANNELS = {
+  compare: 'fileDiff:compare',
+  cancel: 'fileDiff:cancel',
+  detail: 'fileDiff:detail',
+  progress: 'fileDiff:progress',
+} as const;
+
 /** 图片处理通道。 */
 export const IMAGE_CHANNELS = {
   thumbnail: 'image:thumbnail',

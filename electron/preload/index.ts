@@ -9,6 +9,7 @@ import {
   DIALOG_CHANNELS,
   EXCEL_CHANNELS,
   FILE_CHANNELS,
+  FILE_DIFF_CHANNELS,
   FONT_CHANNELS,
   IMAGE_CHANNELS,
   PET_CHANNELS,
@@ -95,6 +96,12 @@ import type {
   WaveformOptions,
 } from '../shared/types';
 import type { PetRect } from '../shared/petWindow';
+import type {
+  FileDiffOptions,
+  FileDiffResult,
+  FileDiffProgress,
+  FileDiffDetail,
+} from '../shared/fileDiff';
 import type { AppCloseAction, AppCloseChoice } from '../shared/appWindow';
 import type {
   WebTestFlow,
@@ -107,6 +114,20 @@ import type {
 
 /** 暴露给渲染进程的自定义 API。 */
 const api = {
+  /** 文件对比只读操作及进度。 */
+  fileDiff: {
+    compare: (options: FileDiffOptions): Promise<IpcResponse<FileDiffResult>> =>
+      ipcRenderer.invoke(FILE_DIFF_CHANNELS.compare, options),
+    cancel: (jobId: string): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(FILE_DIFF_CHANNELS.cancel, jobId),
+    detail: (jobId: string, entryId: string): Promise<IpcResponse<FileDiffDetail>> =>
+      ipcRenderer.invoke(FILE_DIFF_CHANNELS.detail, { jobId, entryId }),
+    onProgress: (callback: (value: FileDiffProgress) => void): (() => void) => {
+      const listener = (_event: unknown, value: FileDiffProgress): void => callback(value);
+      ipcRenderer.on(FILE_DIFF_CHANNELS.progress, listener);
+      return () => ipcRenderer.off(FILE_DIFF_CHANNELS.progress, listener);
+    },
+  },
   /** 网页测试：主进程持有浏览器和录制会话，事件返回退订函数。 */
   webtest: {
     snapshot: (): Promise<IpcResponse<WebTestSnapshot>> =>

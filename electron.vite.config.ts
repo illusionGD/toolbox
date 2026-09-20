@@ -25,6 +25,12 @@ export default defineConfig({
   },
   renderer: {
     root: '.',
+    server: {
+      watch: {
+        // 验证产物含目录循环的 junction 样本；Vite 不会自动沿用 .gitignore。
+        ignored: ['**/out-tbverify/**'],
+      },
+    },
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

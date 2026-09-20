@@ -36,6 +36,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: FolderOpenOutline,
     children: [
       { key: 'file-stats', label: '文件统计', path: '/file/stats' },
+      { key: 'file-diff', label: '批量文件 Diff', path: '/file/diff' },
       { key: 'file-rename', label: '批量重命名', path: '/file/rename' },
       { key: 'file-excel-i18n', label: 'Excel 多语言', path: '/file/excel-i18n' },
     ],

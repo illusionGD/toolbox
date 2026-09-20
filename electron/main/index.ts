@@ -5,6 +5,7 @@ import { registerExternalLinkGuards } from './externalLinks';
 import { registerWindowControlIpc } from './ipc/window';
 import { registerDialogIpc } from './ipc/dialog';
 import { registerFileIpc } from './ipc/file';
+import { registerFileDiffIpc } from './ipc/fileDiff';
 import { registerImageIpc } from './ipc/image';
 import { registerVideoIpc } from './ipc/video';
 import { registerAudioIpc } from './ipc/audio';
@@ -57,6 +58,7 @@ function createWindow(): void {
   registerWindowControlIpc(mainWindow);
   registerDialogIpc(mainWindow);
   registerFileIpc(mainWindow);
+  registerFileDiffIpc(mainWindow);
   registerImageIpc();
   registerVideoIpc(mainWindow);
   registerAudioIpc(mainWindow);
