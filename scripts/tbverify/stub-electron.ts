@@ -35,6 +35,7 @@ export function setEncryptionAvailable(value: boolean): void {
 export const app = {
   /** 打包标记。`@electron-toolkit/utils` 的 `is.dev` 在模块加载时就读它。 */
   isPackaged: false,
+  getAppPath: (): string => userData,
   /**
    * 取路径。
    * @param name 路径名。

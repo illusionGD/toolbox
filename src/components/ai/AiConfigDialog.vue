@@ -192,7 +192,7 @@ import { useAiConfigStore, type AiConfigDraft } from '@/stores/aiConfig';
 /** 温度默认值（与 store 一致，清空输入框时回落到它）。 */
 const DEFAULT_TEMPERATURE = 0.7;
 /** 回复上限默认值。 */
-const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+const DEFAULT_MAX_OUTPUT_TOKENS = 200000;
 
 /** 弹窗模式。 */
 export type AiConfigDialogMode = 'add' | 'edit' | 'duplicate';

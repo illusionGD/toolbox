@@ -35,9 +35,12 @@ export const useUsageStore = defineStore('usage', () => {
   /** 总使用次数。 */
   const totalCount = computed(() => records.value.reduce((sum, r) => sum + r.count, 0));
 
-  /** 最近使用的工具（按最近时间倒序，最多 MAX_RECENT 个）。 */
+  /** 最近使用的可打开工具；导航变更时自动隐藏已卸载或停用的插件。 */
   const recentTools = computed(() =>
-    [...records.value].sort((a, b) => b.lastUsedAt - a.lastUsedAt).slice(0, MAX_RECENT),
+    records.value
+      .filter((record) => getTool(record.key)?.path)
+      .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+      .slice(0, MAX_RECENT),
   );
 
   /** 按分类聚合的使用占比（按次数倒序）。 */

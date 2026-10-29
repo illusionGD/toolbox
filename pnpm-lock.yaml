@@ -62,6 +62,9 @@ importers:
       jsqr:
         specifier: ^1.4.0
         version: 1.4.0
+      jszip:
+        specifier: 3.10.1
+        version: 3.10.1
       marked:
         specifier: 18.0.11
         version: 18.0.11
@@ -89,6 +92,9 @@ importers:
       vue-router:
         specifier: ^5.2.0
         version: 5.2.0(@vue/compiler-sfc@3.5.40)(esbuild@0.21.5)(pinia@4.0.2(@vue/devtools-api@8.1.5)(typescript@5.9.3)(vue@3.5.40(typescript@5.9.3)))(rollup@4.62.2)(vite@5.4.21(@types/node@22.20.1)(lightningcss@1.32.0)(sass-embedded@1.100.0)(sass@1.100.0))(vue@3.5.40(typescript@5.9.3))
+      yauzl:
+        specifier: 2.10.0
+        version: 2.10.0
       zod:
         specifier: ^4.5.4
         version: 4.5.4
@@ -105,6 +111,9 @@ importers:
       '@types/qrcode':
         specifier: ^1.5.6
         version: 1.5.6
+      '@types/yauzl':
+        specifier: 2.10.3
+        version: 2.10.3
       '@vitejs/plugin-vue':
         specifier: ^5.2.1
         version: 5.2.4(vite@5.4.21(@types/node@22.20.1)(lightningcss@1.32.0)(sass-embedded@1.100.0)(sass@1.100.0))(vue@3.5.40(typescript@5.9.3))
@@ -5140,7 +5149,6 @@ snapshots:
   '@types/yauzl@2.10.3':
     dependencies:
       '@types/node': 22.20.1
-    optional: true
 
   '@typescript-eslint/eslint-plugin@8.64.0(@typescript-eslint/parser@8.64.0(eslint@10.7.0(jiti@2.7.0))(typescript@5.9.3))(eslint@10.7.0(jiti@2.7.0))(typescript@5.9.3)':
     dependencies:

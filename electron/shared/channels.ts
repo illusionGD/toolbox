@@ -3,6 +3,42 @@
  * 单一来源，避免字符串在两侧不一致。
  */
 
+/** 插件管理、命令执行及隔离 SDK 通道。 */
+export const PLUGIN_CHANNELS = {
+  list: 'plugins:list',
+  stage: 'plugins:stage',
+  install: 'plugins:install',
+  configure: 'plugins:configure',
+  change: 'plugins:change',
+  run: 'plugins:run',
+  cancel: 'plugins:cancel',
+  logs: 'plugins:logs',
+  changed: 'plugins:changed',
+  preview: 'plugins:preview',
+  openPage: 'plugins:openPage',
+  closePage: 'plugins:closePage',
+  candidates: 'plugins:candidates',
+  candidateFile: 'plugins:candidateFile',
+  discard: 'plugins:discard',
+  export: 'plugins:export',
+  development: 'plugins:development',
+  startDevelopment: 'plugins:startDevelopment',
+  stopDevelopment: 'plugins:stopDevelopment',
+  storageInfo: 'plugins:storageInfo',
+  clearStorage: 'plugins:clearStorage',
+  theme: 'plugins:theme',
+  mcpList: 'plugins:mcpList',
+  mcpSave: 'plugins:mcpSave',
+  mcpRemove: 'plugins:mcpRemove',
+  mcpRun: 'plugins:mcpRun',
+  mcpCancel: 'plugins:mcpCancel',
+  mcpPick: 'plugins:mcpPick',
+  sdk: 'plugins:sdk',
+  ready: 'plugins:ready',
+  execute: 'plugins:execute',
+  result: 'plugins:result',
+} as const;
+
 /** 窗口控制通道。 */
 export const WINDOW_CHANNELS = {
   minimize: 'window:minimize',

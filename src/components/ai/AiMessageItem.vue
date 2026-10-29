@@ -9,13 +9,6 @@
     <img v-else class="ai-msg__avatar ai-msg__avatar--img" :src="avatar" alt="AI" />
 
     <div class="ai-msg__body">
-      <!-- 推理过程折叠在正文之上：deepseek-reasoner 那类会先吐一大段思考 -->
-      <n-collapse v-if="message.reasoning" class="ai-msg__reasoning">
-        <n-collapse-item title="思考过程" name="reasoning">
-          <div class="ai-msg__reasoning-text">{{ message.reasoning }}</div>
-        </n-collapse-item>
-      </n-collapse>
-
       <div v-if="message.images?.length" class="ai-msg__images">
         <img
           v-for="image in message.images"
@@ -31,42 +24,60 @@
         只助手消息渲染 markdown：用户自己打的字里 `*` `#` 缩进多半是字面意思，
         套一层解析反而把内容改了。工具卡片 / 告警 / 报错同理（`summary` 里全是绝对路径）。
       -->
-      <AiMarkdown v-if="message.role === 'assistant'" :text="message.text" :streaming="streaming" />
-      <div v-else-if="message.text" class="ai-msg__text">{{ message.text }}</div>
+      <template v-for="(part, index) in displayParts" :key="`${message.id}-${index}`">
+        <AiMarkdown
+          v-if="part.type === 'text' && message.role === 'assistant'"
+          :text="part.text"
+          :streaming="streaming && index === displayParts.length - 1"
+        />
+        <div v-else-if="part.type === 'text'" class="ai-msg__text">{{ part.text }}</div>
+        <n-collapse v-else-if="part.type === 'reasoning'" class="ai-msg__reasoning">
+          <n-collapse-item title="思考过程" :name="index">
+            <div class="ai-msg__reasoning-text">{{ part.text }}</div>
+          </n-collapse-item>
+        </n-collapse>
 
-      <div v-if="streaming && !message.text" class="ai-msg__typing">正在生成…</div>
-
-      <!-- 整组调用默认折叠；流式追加调用或更新状态时保留用户的展开选择。 -->
-      <details v-if="message.toolCalls?.length" class="ai-msg__tools">
-        <summary class="ai-msg__tools-head">
-          <span>工具调用（{{ message.toolCalls.length }}）</span>
-          <span v-if="hasPendingToolCalls" class="ai-msg__tools-pending">待确认 · 展开处理</span>
-        </summary>
-        <div
-          v-for="call in message.toolCalls"
-          :key="call.callId"
-          class="ai-msg__tool"
-          :class="`ai-msg__tool--${call.status}`"
-        >
-          <div class="ai-msg__tool-head">
-            <span class="ai-msg__tool-dot" />
-            <span class="ai-msg__tool-name">{{ call.name }}</span>
-            <span class="ai-msg__tool-status">{{ STATUS_LABEL[call.status] }}</span>
-            <span v-if="call.elapsed" class="ai-msg__tool-elapsed">
-              {{ formatElapsed(call.elapsed) }}
-            </span>
-          </div>
-          <div class="ai-msg__tool-summary">{{ call.summary }}</div>
-          <div v-if="call.result" class="ai-msg__tool-result">{{ call.result }}</div>
-          <!-- 只有 pending 才有按钮：其余状态那边的 promise 已经落定，点了没人接 -->
-          <div v-if="call.status === 'pending'" class="ai-msg__tool-actions">
-            <n-button size="tiny" type="primary" @click="chat.approveTool(call.callId)"
-              >允许</n-button
+        <!-- 每段连续调用独立折叠；稳定的 key 保留展开选择。 -->
+        <details v-else-if="part.type === 'tools' && part.calls.length" class="ai-msg__tools">
+          <summary class="ai-msg__tools-head">
+            <span>工具调用（{{ part.calls.length }}）</span>
+            <span
+              v-if="part.calls.some((call) => call.status === 'pending')"
+              class="ai-msg__tools-pending"
+              >待确认 · 展开处理</span
             >
-            <n-button size="tiny" quaternary @click="chat.denyTool(call.callId)">拒绝</n-button>
+            <span v-else-if="part.calls.some((call) => call.status === 'running')">执行中…</span>
+          </summary>
+          <div
+            v-for="call in part.calls"
+            :key="call.callId"
+            class="ai-msg__tool"
+            :class="`ai-msg__tool--${call.status}`"
+          >
+            <div class="ai-msg__tool-head">
+              <span class="ai-msg__tool-dot" />
+              <span class="ai-msg__tool-name">{{ call.name }}</span>
+              <span class="ai-msg__tool-status">{{ STATUS_LABEL[call.status] }}</span>
+              <span v-if="call.elapsed" class="ai-msg__tool-elapsed">
+                {{ formatElapsed(call.elapsed) }}
+              </span>
+            </div>
+            <div class="ai-msg__tool-summary">{{ call.summary }}</div>
+            <div v-if="call.result" class="ai-msg__tool-result">{{ call.result }}</div>
+            <!-- 只有 pending 才有按钮：其余状态那边的 promise 已经落定，点了没人接 -->
+            <div v-if="call.status === 'pending'" class="ai-msg__tool-actions">
+              <n-button size="tiny" type="primary" @click="chat.approveTool(call.callId)"
+                >允许</n-button
+              >
+              <n-button size="tiny" quaternary @click="chat.denyTool(call.callId)">拒绝</n-button>
+            </div>
           </div>
-        </div>
-      </details>
+        </details>
+      </template>
+
+      <div v-if="streaming && !message.text && !message.toolCalls?.length" class="ai-msg__typing">
+        正在生成…
+      </div>
 
       <div v-for="(warning, index) in message.warnings ?? []" :key="index" class="ai-msg__warning">
         {{ warning }}
@@ -82,6 +93,7 @@
 import { computed } from 'vue';
 import { NButton, NCollapse, NCollapseItem } from 'naive-ui';
 import type { AiMessage, AiToolCall } from '@shared/types';
+import { getAiMessageParts } from '@shared/aiMessage';
 import AiMarkdown from './AiMarkdown.vue';
 import { formatBytes } from '@/utils/format';
 import { useAiAvatar } from '@/composables/useAiAvatar';
@@ -118,10 +130,20 @@ const chat = useAiChatStore();
  * 助手头像。**整个窗口共用一个 ref**（见 useAiAvatar），所以一屏几十条消息只读一次盘。
  */
 const avatar = useAiAvatar();
-/** 折叠时仍提示待确认操作，避免用户错过工具的确认请求。 */
-const hasPendingToolCalls = computed(() =>
-  props.message.toolCalls?.some((call) => call.status === 'pending'),
-);
+/** 顺序与状态分别维护：更新工具卡片不改变它在消息里的位置。 */
+const displayParts = computed(() => {
+  const calls = new Map(props.message.toolCalls?.map((call) => [call.callId, call]));
+  return getAiMessageParts(props.message).map((part) =>
+    part.type === 'tools'
+      ? {
+          type: 'tools' as const,
+          calls: part.callIds
+            .map((id) => calls.get(id))
+            .filter((call): call is AiToolCall => Boolean(call)),
+        }
+      : part,
+  );
+});
 // #endregion
 
 /**
@@ -230,7 +252,7 @@ function formatElapsed(ms: number): string {
   }
 
   &__tools {
-    margin-top: var(--tb-space-2);
+    margin: var(--tb-space-2) 0;
   }
 
   &__tools-head {

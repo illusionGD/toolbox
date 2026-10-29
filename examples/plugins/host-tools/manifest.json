@@ -1,0 +1,68 @@
+{
+  "id": "example.host-tools",
+  "name": "宿主工具示例",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "演示结构化表单、图片处理和文本差异。",
+  "entry": "plugin.js",
+  "permissions": ["files.readSelected", "files.save", "tools.image", "tools.diff"],
+  "contributes": {
+    "commands": [
+      {
+        "id": "image",
+        "title": "转换所选图片",
+        "description": "选择图片，使用宿主转换并保存。",
+        "ai": true,
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "format": {
+              "type": "string",
+              "enum": ["webp", "png", "jpeg"],
+              "default": "webp",
+              "title": "输出格式"
+            },
+            "quality": { "type": "integer", "default": 80, "title": "质量" },
+            "resize": { "type": "boolean", "default": false, "title": "限制宽度" },
+            "maxWidth": { "type": "integer", "default": 1920, "title": "最大宽度" }
+          },
+          "required": ["format", "quality", "resize"]
+        },
+        "outputSchema": { "type": "array", "items": { "type": "string" } }
+      },
+      {
+        "id": "compare",
+        "title": "比较多组文本",
+        "description": "演示对象、数组表单以及宿主文本 Diff。",
+        "ai": true,
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pairs": {
+              "type": "array",
+              "title": "文本组",
+              "default": [{ "left": "hello\nworld", "right": "hello\ntoolbox" }],
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "left": { "type": "string", "title": "左侧文本" },
+                  "right": { "type": "string", "title": "右侧文本" }
+                },
+                "required": ["left", "right"]
+              }
+            }
+          },
+          "required": ["pairs"]
+        },
+        "outputSchema": { "type": "array", "items": { "type": "string" } }
+      }
+    ],
+    "pages": [
+      { "id": "image", "title": "插件图片转换", "category": "image", "command": "image" },
+      { "id": "compare", "title": "插件文本比较", "category": "file", "command": "compare" }
+    ]
+  }
+}

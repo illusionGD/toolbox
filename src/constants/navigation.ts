@@ -18,6 +18,7 @@ import type { NavItem } from '@/types/navigation';
  */
 export const NAV_ITEMS: readonly NavItem[] = [
   { key: 'home', label: '首页', icon: HomeOutline, path: '/home' },
+  { key: 'plugins', label: '插件管理', icon: AppsOutline, path: '/plugins' },
   {
     key: 'image',
     label: '图片工具',

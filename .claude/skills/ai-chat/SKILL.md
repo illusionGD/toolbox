@@ -13,11 +13,11 @@ description: Toolbox AI 对话（#23a）——Vercel AI SDK **钉死 ai@6**（ai
 
 ## 版本钉死：`ai@6` 不是 latest，照 latest 装出来的组合跑不起来
 
-| 实测 | 后果 |
-|---|---|
-| **`ai@7` 的 `engines.node` 是 `>=22`** | Electron **33.4.11 自带 Node 20.18.3**，用不了。本机 dev node 是 v22.18.0，**两者绝不能混着看** |
-| `ai@6.0.275` 的 `engines.node` 是 `>=18` | 这是可用的最高线 |
-| provider 包大版本与 `ai` **不同步**（`@ai-sdk/anthropic` 的 v4 才配 `ai@7`） | 「装 latest」= 装出 provider@4 + ai@6 的错配 |
+| 实测                                                                         | 后果                                                                                            |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **`ai@7` 的 `engines.node` 是 `>=22`**                                       | Electron **33.4.11 自带 Node 20.18.3**，用不了。本机 dev node 是 v22.18.0，**两者绝不能混着看** |
+| `ai@6.0.275` 的 `engines.node` 是 `>=18`                                     | 这是可用的最高线                                                                                |
+| provider 包大版本与 `ai` **不同步**（`@ai-sdk/anthropic` 的 v4 才配 `ai@7`） | 「装 latest」= 装出 provider@4 + ai@6 的错配                                                    |
 
 所以 `package.json` 里这五个是**精确版本、无 `^`**，改动前先量 Electron 的 Node 版本：
 
@@ -42,13 +42,13 @@ ai 6.0.275 / @ai-sdk/anthropic 3.0.116 / @ai-sdk/openai 3.0.106
 
 **生产代码不用改，但这是「参数怎么没生效」的唯一解释**，也是设置页那句提示的依据：
 
-| 协议 / 模型 | system 的位置 | 最大长度字段 | temperature |
-|---|---|---|---|
-| openai `gpt-5.4` / `gpt-5.6-luna` | **`messages[0].role === 'developer'`** | **`max_completion_tokens`** | **整条丢掉**（`undefined`）+ 回一条 warning |
-| openai `gpt-4o` / `gpt-4.1` | `role: 'system'` | `max_tokens` | 0.7 照下发 |
-| anthropic `claude-opus-5` / `claude-opus-4-8` | 顶层 `system` | `max_tokens` | **整条丢掉** + warning |
-| anthropic `claude-sonnet-4-6` / `claude-3-5-haiku` | 顶层 `system` | `max_tokens` | 0.7 照下发 |
-| openai-compat（glm / deepseek / kimi） | `role: 'system'` | `max_tokens` | 0.7 照下发 |
+| 协议 / 模型                                        | system 的位置                          | 最大长度字段                | temperature                                 |
+| -------------------------------------------------- | -------------------------------------- | --------------------------- | ------------------------------------------- |
+| openai `gpt-5.4` / `gpt-5.6-luna`                  | **`messages[0].role === 'developer'`** | **`max_completion_tokens`** | **整条丢掉**（`undefined`）+ 回一条 warning |
+| openai `gpt-4o` / `gpt-4.1`                        | `role: 'system'`                       | `max_tokens`                | 0.7 照下发                                  |
+| anthropic `claude-opus-5` / `claude-opus-4-8`      | 顶层 `system`                          | `max_tokens`                | **整条丢掉** + warning                      |
+| anthropic `claude-sonnet-4-6` / `claude-3-5-haiku` | 顶层 `system`                          | `max_tokens`                | 0.7 照下发                                  |
+| openai-compat（glm / deepseek / kimi）             | `role: 'system'`                       | `max_tokens`                | 0.7 照下发                                  |
 
 推理模型丢 temperature **不是 bug 也不是我们丢的**，SDK 会把它作为 warning 返回，我们把 warning 一路推到消息气泡上——设置页写明「实测部分推理模型会把这个值整条丢掉并回一条告警，属正常」。第一版断言按「temperature 一定下发」写，三条红了；**没有放宽断言，而是写探针量出上表，再把两个分支各自断言**（reasoning 与非 reasoning 都测）。
 
@@ -66,12 +66,12 @@ ai 6.0.275 / @ai-sdk/anthropic 3.0.116 / @ai-sdk/openai 3.0.106
 
 ## 三样东西存三个地方
 
-| 存什么 | 存哪 | 为什么 |
-|---|---|---|
-| 配置本体（id/名称/provider/model/baseUrl/systemPrompt/temperature + activeId） | `app-state.json` 的 `ai` 命名空间（`<dataDir>`） | 跟着数据目录迁移，零新增设施，直接用现成 `readState/writeState`（见 [[app-storage]]） |
-| **API Key** | **`<userData>/ai-keys.json`**，逐条 `safeStorage.encryptString` | 数据目录设计成**可搬走、可指网盘**，把凭据一起搬出去是坑；且 Windows 上 safeStorage 是 DPAPI、绑当前账户，搬走也解不开。同「指针 settings.json 放 userData」一个理由 |
-| 对话记录 | `<dataDir>/ai/conversations.json`，懒加载 + 防抖写 | **不塞 app-state.json**：那个文件启动时同步读进内存，聊天记录会让冷启动越来越慢 |
-| 图片 | `<dataDir>/ai/images/<hash>.<ext>` | 图片是对话记录的一部分，放 cacheDir 会被「清空缓存」连聊天历史一起打断 |
+| 存什么                                                                         | 存哪                                                            | 为什么                                                                                                                                                               |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 配置本体（id/名称/provider/model/baseUrl/systemPrompt/temperature + activeId） | `app-state.json` 的 `ai` 命名空间（`<dataDir>`）                | 跟着数据目录迁移，零新增设施，直接用现成 `readState/writeState`（见 [[app-storage]]）                                                                                |
+| **API Key**                                                                    | **`<userData>/ai-keys.json`**，逐条 `safeStorage.encryptString` | 数据目录设计成**可搬走、可指网盘**，把凭据一起搬出去是坑；且 Windows 上 safeStorage 是 DPAPI、绑当前账户，搬走也解不开。同「指针 settings.json 放 userData」一个理由 |
+| 对话记录                                                                       | `<dataDir>/ai/conversations.json`，懒加载 + 防抖写              | **不塞 app-state.json**：那个文件启动时同步读进内存，聊天记录会让冷启动越来越慢                                                                                      |
+| 图片                                                                           | `<dataDir>/ai/images/<hash>.<ext>`                              | 图片是对话记录的一部分，放 cacheDir 会被「清空缓存」连聊天历史一起打断                                                                                               |
 
 **明文 key 只有一个方向、一次**：渲染进程 → `ai:setKey`。回来的永远只有 `{configId, hasKey, hint, encrypted}`，`hint` 是 `sk-a…wxyz` 这种掩码。`listKeyStatus` 也只回这个形状。
 
@@ -130,11 +130,11 @@ review 提「ai 的 prompt 要统一维护才行，后续还有不同的 prompt�
 
 **这个对话界面的外壳被推翻了两次，三种形态各自的否掉理由记在这，别再走回头路。**
 
-| 形态 | 谁提的 | 为什么废了 |
-|---|---|---|
-| ① `n-modal` 居中弹窗（第一轮交付） | 我 | 有遮罩（挡住工具页，而它的整个用途就是**边用工具边问**）、强制居中、不可拖 |
-| ② 挂 `AppLayout` 的 `position:fixed` 浮动面板（第一轮 review 返工） | 用户否掉了我最初的独立窗口方案（「看起来独立窗口很麻烦」） | 第二轮 review：「**可以拖拽出 app**」——DOM 越不过窗口边界，拖到边上只会被裁掉 |
-| ③ **独立的无边框 `BrowserWindow`**（现状） | 用户拍的：「直接单独脱离窗口就行，**不需要在 app 里面，不需要分离贴回**」 | — |
+| 形态                                                                | 谁提的                                                                    | 为什么废了                                                                    |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| ① `n-modal` 居中弹窗（第一轮交付）                                  | 我                                                                        | 有遮罩（挡住工具页，而它的整个用途就是**边用工具边问**）、强制居中、不可拖    |
+| ② 挂 `AppLayout` 的 `position:fixed` 浮动面板（第一轮 review 返工） | 用户否掉了我最初的独立窗口方案（「看起来独立窗口很麻烦」）                | 第二轮 review：「**可以拖拽出 app**」——DOM 越不过窗口边界，拖到边上只会被裁掉 |
+| ③ **独立的无边框 `BrowserWindow`**（现状）                          | 用户拍的：「直接单独脱离窗口就行，**不需要在 app 里面，不需要分离贴回**」 | —                                                                             |
 
 第三种形态**没有**「拖出去 / 贴回来」这回事：AI 对话**永远**是独立窗口，app 里不再有内嵌面板，所以也就没有两态之间的交接协议。当初为形态 ② 写的 `AiChatPanel.vue`、`useDragResize.ts`（八向缩放 + 视口夹紧 + `setPointerCapture`）、`AiConfigState.panel`、`AiPanelGeometry` **全部删掉了**——拖动与缩放归 OS。
 
@@ -178,11 +178,11 @@ review 提「ai 的 prompt 要统一维护才行，后续还有不同的 prompt�
 
 截图里 warning 显示成一行原始 JSON，是我写的 bug：`describeWarning` 判的是 `type === 'unsupported-setting'` + `w.setting`，**这两个名字 SDK 里都不存在**，所以**每一条** warning 都落到 `JSON.stringify` 兜底。真实定义在 `node_modules/@ai-sdk/provider/dist/index.d.ts:68`，就三种：
 
-| 形状 | 输出 |
-|---|---|
-| `{type:'unsupported', feature, details?}` | 「该模型不支持<中文功能名>，已忽略」 |
+| 形状                                        | 输出                                           |
+| ------------------------------------------- | ---------------------------------------------- |
+| `{type:'unsupported', feature, details?}`   | 「该模型不支持<中文功能名>，已忽略」           |
 | `{type:'compatibility', feature, details?}` | 「以兼容模式使用<中文功能名>，结果可能不理想」 |
-| `{type:'other', message}` | 原文 |
+| `{type:'other', message}`                   | 原文                                           |
 
 - **`details` 只在 feature 认不出时才附上**：截图那句 details 是「temperature is not supported by claude-opus-4-8 and will be ignored」，中文句已经把它说完，再括号一遍是噪音；认不出 feature 时反过来必须留着，否则信息全丢。
 - **教训在验证方式上，不在代码上**：上一轮探针只断言了「有没有 warning」，没断言文本，所以这个错一路漏到界面。现在桩测断言的是**逐字文本**，并且留了一条回归断言——旧的 `{type:'unsupported-setting', setting:'temperature'}` 必须落到 JSON 兜底（确认不是把一个错名字改成了另一个错名字）。
@@ -197,7 +197,7 @@ review 提「ai 的 prompt 要统一维护才行，后续还有不同的 prompt�
 
 ### 工具审批下拉（第 5 条）
 
-`AiConfigState.toolApproval`（**全局一份，不是每配置一份**，默认 `'ask'`），位置在输入框上方、模型下拉右边。第一轮它只是个占位（`n-tooltip` 标着「下一轮上线」），**23b 已经让它生效并拓宽成 `off | ask | auto` 三态、tooltip 也删了**，取值语义与确认往返见 [[ai-tools]]。
+`AiConfigState.toolApproval`（**全局一份，不是每配置一份**，默认 `'ask'`），位置在输入框上方、模型下拉右边。第一轮它只是个占位，23b 已经让它生效并拓宽成 **`off | ask | auto` 三态**。悬停提示说明当前模式的读写行为及对下次发送生效，取值语义与确认往返见 [[ai-tools]]。
 
 ## 验证
 
@@ -241,9 +241,9 @@ ai 565 项 / @ai-sdk/anthropic 56 / openai 84 / google 71 / openai-compatible 48
 
 工具调用本身、13 个工具的清单、确认往返的四条边界都在 [[ai-tools]]，这里只留接缝的**去向**，免得两边各写一份：
 
-- 第一轮占位的 `AiToolSpec { name, description, kind }` **已删除**——真正的形状是主进程私有的 `ToolDef`（带 `inputSchema` / `summarize` / `forceConfirm` / `run`）加上跨 IPC 的 `AiToolCall`（一次调用的状态记录，既上界面也落盘）。占位那份留着就是两份定义。
+- 第一轮占位的 `AiToolSpec { name, description, kind }` **已删除**——真正的形状是主进程私有的 `ToolDef`（带 `inputSchema` / `summarize` / `run`）加上跨 IPC 的 `AiToolCall`（一次调用的状态记录，既上界面也落盘）。占位那份留着就是两份定义。
 - `streamText` 调用处那行「本轮不注册任何工具」的注释换成了真的 `tools` + `stopWhen: stepCountIs(8)`。
-- 已定的规则（用户拍的，23b 照做）：**只读工具直接跑**；**写盘类要确认**；确认策略就是那个下拉，且 **`overwrite` 在 `auto` 下仍然确认**。
+- 用户 2026-09-20 更新的规则：**只读工具直接跑**；**询问模式逐次确认写工具，自动模式直接执行全部写工具（包括覆盖、重命名、网页测试及插件命令）**；关闭模式不下发工具。模式对下次发送生效，底层参数校验与能力授权继续生效。
 - 工具事件**复用 `ai:chatStream`**（`AiStreamEvent.type` 加 `'tool'`），所以渲染进程 `onAiStream` 一处订阅全包；新增的只有渲染 → 主的 `ai:toolReply`。
 
 素材是现成的全表 `file.* / image.* / video.* / audio.* / font.* / bitmapFont.* / excel.* / storage.* / dialog.*`（见 [[common-capabilities]]）。

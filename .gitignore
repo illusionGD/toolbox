@@ -9,3 +9,5 @@ release
 .env.local
 .env.*.local
 data
+skills/*
+!skills/README.md

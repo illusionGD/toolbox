@@ -1,0 +1,54 @@
+{
+  "id": "example.translation-checker",
+  "name": "翻译检查",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "比较两份 JSON 语言内容，列出目标语言缺失的键。",
+  "entry": "plugin.js",
+  "permissions": [],
+  "contributes": {
+    "commands": [
+      {
+        "id": "check",
+        "title": "检查缺失翻译",
+        "description": "输入基准与目标语言 JSON 字符串，返回目标语言缺少的键。",
+        "ai": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "title": "基准语言 JSON",
+              "default": "{\"hello\":\"你好\",\"bye\":\"再见\"}"
+            },
+            "target": {
+              "type": "string",
+              "title": "目标语言 JSON",
+              "default": "{\"hello\":\"Hello\"}"
+            }
+          },
+          "required": ["source", "target"],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "missing": { "type": "array", "items": { "type": "string" } },
+            "count": { "type": "integer" }
+          },
+          "required": ["missing", "count"],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "pages": [
+      { "id": "main", "title": "翻译检查", "category": "file", "command": "check" },
+      {
+        "id": "custom",
+        "title": "翻译检查 · 自定义页",
+        "category": "file",
+        "entry": "ui/index.html"
+      }
+    ]
+  }
+}

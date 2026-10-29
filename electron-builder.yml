@@ -6,6 +6,9 @@ directories:
 files:
   - out/**
   - package.json
+extraFiles:
+  - from: skills/README.md
+    to: skills/README.md
 # 原生模块与二进制必须解包，否则 asar 内的 .node 无法加载、.exe 无法 spawn
 asarUnpack:
   - node_modules/sharp/**

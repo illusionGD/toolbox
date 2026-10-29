@@ -32,6 +32,8 @@ export interface ToolCtx {
  * 混进上下文让模型跟着复读。
  */
 export interface ToolOutput {
+  /** 已执行但返回失败结果（如脚本非零退出）；保留结构化输出并显示错误状态。 */
+  failed?: boolean;
   /** 一行中文结果摘要。 */
   note: string;
   /** 回给模型的结构。**必须精简且封顶**，见 registry.ts 顶部的两条硬规则。 */
@@ -50,13 +52,6 @@ export interface ToolDef<S extends z.ZodType = z.ZodType> {
   inputSchema: S;
   /** 一行中文参数摘要，确认卡与落盘记录共用。 */
   summarize(input: z.infer<S>): string;
-  /**
-   * 即使在 `auto` 模式也必须确认。
-   *
-   * 现在只有一个用途：`overwrite === true`。覆盖原文件是**不可逆的数据丢失**，而模型
-   * 是可能被文件内容里的话带偏的，所以这条不给「自动」放行。
-   */
-  forceConfirm?(input: z.infer<S>): boolean;
   /** 真正干活。抛错由包装层接住并变成 `{error}` 回给模型。 */
   run(input: z.infer<S>, ctx: ToolCtx): Promise<ToolOutput>;
 }

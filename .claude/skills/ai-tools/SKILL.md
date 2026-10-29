@@ -5,15 +5,21 @@ description: Toolbox 应用内 AI 工具注册、确认卡、取消及有界结�
 
 # AI 工具调用（#23b）
 
+## 插件扩展
+
+`buildTools` 在原有 24 个静态工具之外，加入 `plugin_sdk`、`plugin_create_draft`、`plugin_diagnostics`，以及当前启用且得到 AI 授权的插件命令。插件命令有独立沙箱、宿主能力校验、版本检查和有界输出，遵循统一的询问/自动模式。应用插件开发与维护见 [plugin-system](../plugin-system/SKILL.md)。
+
+存在已启用、显式信任且允许 AI 的 stdio 或 HTTP MCP 配置时，再加入 `mcp_list_tools` / `mcp_call_tool`。两者均归 write（发现工具也会启动本地程序或访问外部服务），遵循 ask/auto，并捕获配置 revision。stdio 运行独立受信任系统进程，HTTP 将参数发送给配置的服务；都不属于普通插件沙箱，描述与结果仍当作第三方数据。工具元数据只包含服务 ID、名称与传输类型，不暴露 HTTP URL 和鉴权请求头。普通插件 SDK 已提供按 origin 授权的网络，以及图片/媒体/Diff/网页测试适配，`plugin_sdk` 的说明和 `packages/plugin-sdk` 必须同步。
+
 ## 当前扩展：网页测试
 
 当前共 24 个工具（13 读、11 写），原有通用 13 个工具之外新增 `webtest_*` 11 个，定义于 `electron/main/ai/tools/webtest.ts`。详见 [webtest](../webtest/SKILL.md)。它们通过 `webtest/access.ts` 共用 IPC 初始化的会话、事件和持久化队列，不另建浏览器。
 
 网页测试是用户明确加入的浏览器能力：允许检查已打开页的 DOM 和在指定测试环境回放用例。仍不提供通用抓取、任意网页 JS、shell 或 AI 文件删除。下文「13 个工具」描述的是原通用工具集。
 
-`ToolCtx.signal` 传递聊天取消信号，`runTool` 执行前检查取消。网页回放用任务标识隔离取消所有权；AI 修复保存/导入/新录制强制确认，修复预览默认 `dryRun:true`，修改使用 `expectedRevision` 防止与用户操作冲突。输出按工具分页并封顶。
+`ToolCtx.signal` 传递聊天取消信号，`runTool` 执行前检查取消。网页回放用任务标识隔离取消所有权；AI 修复保存/导入/新录制在询问模式确认、自动模式直接执行，修复预览默认 `dryRun:true`，修改使用 `expectedRevision` 防止与用户操作冲突。输出按工具分页并封顶。
 
-用户六条需求里的**第 4 条**：让 AI 调工具箱现有的能力。#23a（见 [[ai-chat]]）只会聊天，接缝留在那儿。用户拍定的四条：**工具范围** = 读 8 + 写 5；**确认 UI** = 消息流里的内联卡片（不是模态弹窗，确认过什么会作为记录留在会话里）；**overwrite 在 `auto` 下仍然确认**；**下拉加第三项「工具：关闭」**。
+用户六条需求里的**第 4 条**：让 AI 调工具箱现有的能力。#23a（见 [[ai-chat]]）只会聊天，接缝留在那儿。原通用工具范围为读 8 + 写 5；确认 UI 使用消息流内联卡片，另提供「工具：关闭」。2026-09-20 用户更新要求：**自动模式直接执行所有写工具，包括覆盖、重命名、网页测试及插件命令**，询问模式才逐次确认。
 
 用了 SDK 之后我们只写三样：工具本体、确认往返、卡片。`tool({description, inputSchema, execute})` 交给 `streamText`，三家协议的 tool_call 翻译与**多步循环**都归 SDK，且循环发生在**一次请求内部**。
 
@@ -32,12 +38,11 @@ electron/main/ai/tools/
 
 ```ts
 interface ToolDef<S extends z.ZodType> {
-  name: string;                                  // snake_case
+  name: string; // snake_case
   kind: 'read' | 'write';
   description: string;
   inputSchema: S;
-  summarize(input): string;                       // 一行中文，确认卡与落盘共用
-  forceConfirm?(input): boolean;                  // auto 也要确认
+  summarize(input): string; // 一行中文，确认卡与落盘共用
   run(input, ctx): Promise<{ note: string; data: unknown }>;
 }
 ```
@@ -58,33 +63,33 @@ interface ToolDef<S extends z.ZodType> {
 
 **读（`kind:'read'`，直接跑，不确认）**
 
-| 工具 | 底层 | 封顶 / 要点 |
-|---|---|---|
-| `list_files` | `scanDirectory(null, …)` | scanId 用 `ai-tool-<callId>`；≤ 200 条 `{path,name,size,ext}` + `{total,dirs,listed,truncated}`。**`files` 这个字段名在返回值里不存在**，桩测专门断言了这点 |
-| `probe_image` | 新增私有 `probeImage`（sharp `metadata()`） | 宽高 / 格式 / 是否动图 / 字节 |
-| `probe_video` / `probe_audio` | `probeVideo` / `probeAudio`（本来就导出） | |
-| `probe_font` | `probeFont` | 字号 / 字形数 / 是否可变字体 |
-| `probe_excel` | `probeExcel` | 工作表 / 表头 / 行数 |
-| `read_text_file` | `readFile(path,'utf-8')` | ≤ 64 KB，截断如实说 |
-| `storage_info` | `getPathsInfo` + `dirUsage` | 数据目录 / 缓存目录及占用 |
+| 工具                          | 底层                                        | 封顶 / 要点                                                                                                                                                 |
+| ----------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_files`                  | `scanDirectory(null, …)`                    | scanId 用 `ai-tool-<callId>`；≤ 200 条 `{path,name,size,ext}` + `{total,dirs,listed,truncated}`。**`files` 这个字段名在返回值里不存在**，桩测专门断言了这点 |
+| `probe_image`                 | 新增私有 `probeImage`（sharp `metadata()`） | 宽高 / 格式 / 是否动图 / 字节                                                                                                                               |
+| `probe_video` / `probe_audio` | `probeVideo` / `probeAudio`（本来就导出）   |                                                                                                                                                             |
+| `probe_font`                  | `probeFont`                                 | 字号 / 字形数 / 是否可变字体                                                                                                                                |
+| `probe_excel`                 | `probeExcel`                                | 工作表 / 表头 / 行数                                                                                                                                        |
+| `read_text_file`              | `readFile(path,'utf-8')`                    | ≤ 64 KB，截断如实说                                                                                                                                         |
+| `storage_info`                | `getPathsInfo` + `dirUsage`                 | 数据目录 / 缓存目录及占用                                                                                                                                   |
 
 **写（`kind:'write'`，`ask` 下逐次确认）**
 
-| 工具 | 底层 | `forceConfirm` |
-|---|---|---|
-| `compress_images` | `compressOne` **串行**（sharp 吃满 CPU，并发只会互相抢） | `overwrite === true` |
-| `convert_video` | `transcodeOne(null, …)`，taskId `ai-<requestId>-<now>` + `trackTask` | `overwrite === true` |
-| `convert_audio` | `convertOne(null, …)`，同上 | `overwrite === true` |
-| `rename_files` | `renameBatch`（自带 preflight） | **总是** |
-| `write_text_file` | 新增 `writeTextFile`（**不走 `saveText`**，那个会弹保存对话框） | `overwrite === true` |
+| 工具              | 底层                                                                 | 执行策略                 |
+| ----------------- | -------------------------------------------------------------------- | ------------------------ |
+| `compress_images` | `compressOne` **串行**（sharp 吃满 CPU，并发只会互相抢）             | ask 确认 / auto 直接执行 |
+| `convert_video`   | `transcodeOne(null, …)`，taskId `ai-<requestId>-<now>` + `trackTask` | ask 确认 / auto 直接执行 |
+| `convert_audio`   | `convertOne(null, …)`，同上                                          | ask 确认 / auto 直接执行 |
+| `rename_files`    | `renameBatch`（自带 preflight）                                      | ask 确认 / auto 直接执行 |
+| `write_text_file` | 新增 `writeTextFile`（**不走 `saveText`**，那个会弹保存对话框）      | ask 确认 / auto 直接执行 |
 
-> **与计划的偏差**：计划里 `write_text_file` 写的是「目标已存在时」强制确认。实现改成了 `overwrite === true`——「目标存在吗」要先 `stat` 一次，而 `forceConfirm` 是同步的；而且不带 `overwrite` 时底层本来就会因为文件已存在而报错，走的是 `{error}` 那条路，模型看得懂。
+确认策略只由 `runTool` 中的 mode 决定，已移除工具级 `forceConfirm`。`overwrite` 仍是文件 API 的覆盖参数：未允许覆盖时，底层继续拒绝覆盖已有文件；自动模式不会修改参数或绕过这项检查。
 
 ## 包装层（`index.ts` 的 `runTool`）
 
 ```
 callId = randomUUID()；summary = def.summarize(input)（它自己抛错只降级成工具名，不拖累调用）
-需要确认? = kind === 'write' && (mode === 'ask' || forceConfirm?.(input) === true)
+需要确认? = kind === 'write' && mode === 'ask'
 需要确认 → emit(pending) → await requestConfirm(requestId, callId)
             拒绝 → emit(denied, result:'已拒绝') → return { denied:true, message:'用户拒绝了这次调用。不要重试，改问用户希望怎么做。' }
 emit(running) → try run() → emit(done, result:note, elapsed) → return output.data
@@ -116,7 +121,7 @@ emit(running) → try run() → emit(done, result:note, elapsed) → return outp
 
 `toolMode` **跟着 `AiChatRequest` 下发，主进程不去读 app-state**——同 `config` 整份下发的理由：主进程读了那个文件就是两份状态，必然漂移。`testConnection` 传 `toolMode:'off'`（「测试连接」带上十几个工具声明既费 token，又可能因为端点不吃 `tools` 把一次本来能通的连接测成失败）。
 
-**`overwrite` 在 `auto` 下仍然确认**（用户拍的）：覆盖原文件是不可逆的数据丢失，而模型是可能被文件内容里的话带偏的。
+`auto` 直接执行读写工具，`ask` 只对写工具确认，`off` 不下发工具。模式随请求固定，对下次发送生效，不自动放行旧请求已经等待的确认卡。能力授权、输入校验、版本检查和取消仍在底层执行。
 
 ## 实测出来的 ai@6 形状（别再量一遍）
 
@@ -140,13 +145,13 @@ emit(running) → try run() → emit(done, result:note, elapsed) → return outp
 
 **桩测第一次全绿时先证明它会红**（[[toolbox-workflow-conventions]] 的硬要求）。五条逐个拆掉再跑，每条都改回去了：
 
-| 拆掉 | 结果 |
-|---|---|
+| 拆掉                            | 结果                                                             |
+| ------------------------------- | ---------------------------------------------------------------- |
 | `cancelChat` 里的 `denyPending` | 红 2 条（**且没挂死**——正好验证 `settledWithin` 的兜底在起作用） |
-| upsert 改回 push | 渲染红 10 条 |
-| `forceConfirm` | 主进程红 4 条（`auto`+`overwrite`、`rename_files`） |
-| `ensureLoaded` 的净化 | 渲染红 2 条 |
-| 拒绝改成 `throw` | 红 2 条 |
+| upsert 改回 push                | 渲染红 10 条                                                     |
+| 写工具的模式判断                | 现有测试同时验证 ask 确认、auto 覆盖与重命名直接落盘             |
+| `ensureLoaded` 的净化           | 渲染红 2 条                                                      |
+| 拒绝改成 `throw`                | 红 2 条                                                          |
 
 **最后那条第一次跑是「整个进程被未捕获异常打死」**——退出码是红的，但一条断言名都不打。所以桩测的 `callTool` 现在**接住抛出换成 `{threw: 原因}`**，跟 `settledWithin` 兜挂死是同一个理由：坏了要变成一条红断言，不是变成崩溃。
 
@@ -154,6 +159,6 @@ emit(running) → try run() → emit(done, result:note, elapsed) → return outp
 
 **tbverify 的五个 `--external:`**（23b 新增，理由写在 `run.cjs` 头）：主进程入口经 `registry.ts` 连上了 `ipc/{file,image,video,audio,font,excel}.ts`，于是拖进来两类打不进 ESM bundle 的东西——`cn-font-split`（`koffi` 里十几个 `.node` + `require('bun:ffi')`）、`subset-font` / `fontverter`（链上 `wawoff2` 是 emscripten 产物，**模块级**就用 `__dirname` 找 wasm）、`@ffmpeg-installer/ffmpeg` / `@ffprobe-installer/ffprobe`（`__dirname` 现算二进制路径 → `ERR_AMBIGUOUS_MODULE_SYNTAX`）。留成 external 由 node 按 CJS 原样加载，`ffmpegInstaller.path` 照样拿得到。这些都在桩测碰不到的路径上。`--alias` 救不了这个场景：它退不到相对导入路径。同时 `stub-electron.ts` 要补 `dialog` / `protocol`（`file.ts` 的另存、`protocol/media.ts`），少一个 bundle 就断。
 
-**人工验，本机做得了的（不需要真 key）**：三项下拉切得动且落盘（关窗重开还在）、「下一轮上线」那句 tooltip 不见了。
+**人工验，本机做得了的（不需要真 key）**：三项下拉切得动且落盘（关窗重开还在），悬停提示说明当前模式的读写行为及对下次发送生效。
 
-**人工验，需要用户真 key**：问「D:\某目录 里有哪些 png，多大」→ `list_files` **直接跑完**（读工具不问）→ 模型用结果作答；「压成 webp 存到 out」→ 出现**待确认卡片**，允许 → running → done、输出文件真的在；拒绝 → 卡片标已拒绝且**模型接着说话**（不是整条消息报错）；切「自动」→ 不再问，但要求「覆盖原图」时**仍然弹确认**；切「关闭」→ 模型说自己没有工具；确认卡挂着时点「停止」→ 卡片变已拒绝、请求结束、不挂死；确认卡挂着时**直接关窗口** → 重开后那张卡是「已中断」；`convert_video` 跑到一半点「停止」→ **任务管理器里没有残留的 ffmpeg.exe**；多步：「看看这个视频多大、然后转成 720p」→ 一条消息里两张卡按顺序出现；不吃 `tools` 的兼容端点 → 气泡上是一句中文「该模型不支持工具调用，已忽略」而不是原始 JSON。
+**人工验，需要用户真 key**：问「D:\某目录 里有哪些 png，多大」→ `list_files` **直接跑完**（读工具不问）→ 模型用结果作答；询问模式下「压成 webp 存到 out」→ 出现**待确认卡片**，允许 → running → done、输出文件真的在；拒绝 → 卡片标已拒绝且**模型接着说话**（不是整条消息报错）；切「自动」后发送新请求 → 写入、覆盖和重命名等写工具均**直接执行**；切「关闭」→ 模型说自己没有工具；确认卡挂着时点「停止」→ 卡片变已拒绝、请求结束、不挂死；确认卡挂着时**直接关窗口** → 重开后那张卡是「已中断」；`convert_video` 跑到一半点「停止」→ **任务管理器里没有残留的 ffmpeg.exe**；多步：「看看这个视频多大、然后转成 720p」→ 一条消息里两张卡按顺序出现；不吃 `tools` 的兼容端点 → 气泡上是一句中文「该模型不支持工具调用，已忽略」而不是原始 JSON。

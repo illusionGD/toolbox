@@ -24,12 +24,15 @@ import SpinePreviewView from '@/views/media/SpinePreviewView.vue';
 import VideoView from '@/views/media/VideoView.vue';
 import AudioView from '@/views/media/AudioView.vue';
 import WebTestView from '@/views/dev/WebTestView.vue';
+import PluginManagerView from '@/views/plugins/PluginManagerView.vue';
+import PluginPageView from '@/views/plugins/PluginPageView.vue';
 
 /**
  * 已实现工具的 key → 页面组件映射。
  * 未在此表中的工具走 PlaceholderView（功能开发中）。
  */
 const TOOL_COMPONENTS: Record<string, Component> = {
+  plugins: PluginManagerView,
   'image-compress': ImageCompressView,
   'image-crop': ImageCropView,
   'image-stylize': ImageStylizeView,
@@ -79,6 +82,12 @@ const routes: RouteRecordRaw[] = [
   { path: '/home', name: 'home', component: HomeView, meta: { title: '首页', navKey: 'home' } },
   ...buildToolRoutes(NAV_ITEMS),
   {
+    path: '/plugins/:pluginId/:pageId',
+    name: 'plugin-page',
+    component: PluginPageView,
+    meta: { title: '插件', navKey: 'plugins' },
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: SettingsView,
@@ -101,7 +110,10 @@ export const router = createRouter({
 // 进入工具页时统一记录使用（首页/设置/关于不计）。
 // 各入口（首页卡片、最近使用、侧栏）都经路由，故在此单点埋点避免重复计数。
 router.afterEach((to) => {
-  const navKey = to.meta.navKey as string | undefined;
+  const navKey =
+    to.name === 'plugin-page'
+      ? `plugin:${to.params.pluginId}:${to.params.pageId}`
+      : (to.meta.navKey as string | undefined);
   if (!navKey || navKey === 'home') return;
   const tool = getTool(navKey);
   if (!tool?.path) return;

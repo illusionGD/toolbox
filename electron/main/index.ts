@@ -17,17 +17,23 @@ import { registerAiIpc } from './ipc/ai';
 import { registerPetIpc } from './ipc/pet';
 import { registerAppCloseIpc } from './ipc/appClose';
 import { registerWebTestIpc } from './ipc/webtest';
+import { registerPluginsIpc } from './ipc/plugins';
+import { initPlugins, restorePluginDrafts, stopPlugins } from './plugins/registry';
+import { initMcp } from './plugins/mcp';
+import { registerPluginScheme } from './plugins/runtime';
 import { initPanelWindow } from './ai/panelWindow';
 import { initPetWindow, restorePetWindow } from './pet/petWindow';
 import { initAppClose } from './appClose';
 import { initWindowNav } from './windowNav';
 import { registerMediaProtocol, registerMediaScheme } from './protocol/media';
 import { initStoragePaths } from './storage/paths';
+import { skillLibrary } from './ai/skills/registry';
 import { registerAppStateSuspender } from './storage/appState';
 import { APP_CHANNELS } from '../shared/channels';
 
 // 特权协议必须在 app ready 之前注册，放在模块顶层是最稳的时机
 registerMediaScheme();
+registerPluginScheme();
 
 /** 创建主窗口。开发环境加载 dev server，生产加载打包后的 index.html。 */
 function createWindow(): void {
@@ -70,6 +76,7 @@ function createWindow(): void {
   registerPetIpc();
   registerAppCloseIpc();
   registerWebTestIpc(mainWindow);
+  registerPluginsIpc(mainWindow);
   // 主窗口的引用两个子窗口都要摸（AI 窗口跳设置页、桌宠把它藏起来再拿回来），存一处
   initWindowNav(mainWindow);
   // AI 对话是独立窗口：把主窗口交给它当宿主（默认位置 + 设置页跳转 + 跟着一起关）
@@ -96,7 +103,11 @@ app.whenReady().then(async () => {
   // 但它绝不能挡住建窗口——catch 掉之后渲染进程会自己降级，总比双击图标毫无反应好。
   try {
     await initStoragePaths();
+    await skillLibrary().catch((error: unknown) => console.error('[skills] 初始化失败：', error));
     registerAppStateSuspender();
+    await initPlugins();
+    await restorePluginDrafts();
+    await initMcp().catch((error) => console.error('[plugins:mcp]', error));
   } catch (error) {
     console.error('[main] 存储初始化失败，继续启动：', error);
   }
@@ -125,3 +136,5 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
+app.on('before-quit', () => stopPlugins());

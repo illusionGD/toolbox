@@ -13,6 +13,7 @@
  */
 import { createPinia, setActivePinia } from 'pinia';
 import type { AiConversation, AiToolCall } from '@shared/types';
+import { getAiMessageParts } from '@shared/aiMessage';
 import { useAiConfigStore } from '@/stores/aiConfig';
 import { useAiChatStore } from '@/stores/aiChat';
 import {
@@ -963,6 +964,91 @@ fresh();
 // 防抖写盘的计时器可能还排着，等它们烧完再汇总，免得干扰 exit code
 await sleep(650);
 void writeCounts;
+
+/* ---------------- 内容时间线：状态更新、结果校准与重开 ---------------- */
+await sleep(650);
+fresh();
+{
+  const config = useAiConfigStore();
+  const configId = config.addConfig({ name: '时间线测试' });
+  seedKey(configId, 'sk-test-timeline');
+  await config.refreshKeyStatus();
+  const chat = useAiChatStore();
+  await chat.ensureLoaded();
+  const sending = chat.send('分两组处理');
+  const { request, resolve } = chatCalls[0];
+  const requestId = request.requestId;
+  const assistant = chat.activeConversation!.messages[1];
+  emitStream({ requestId, type: 'text', delta: '' });
+  emitStream({ requestId, type: 'text', delta: '先' });
+  emitStream({ requestId, type: 'text', delta: '检查。' });
+  for (let i = 1; i <= 5; i++) {
+    emitStream({
+      requestId,
+      type: 'tool',
+      toolCall: toolCall({ callId: `t${i}`, status: 'running' }),
+    });
+  }
+  emitStream({ requestId, type: 'text', delta: '开始处理。' });
+  // 上一组延迟完成不能切断正在生成的文字，也不能挪到新组。
+  emitStream({ requestId, type: 'tool', toolCall: toolCall({ callId: 't1', status: 'done' }) });
+  emitStream({ requestId, type: 'tool', toolCall: toolCall({ callId: 't6', status: 'pending' }) });
+  emitStream({ requestId, type: 'reasoning', delta: '再次检查' });
+  emitStream({ requestId, type: 'text', delta: '完成。' });
+  const expected = [
+    { type: 'text', text: '先检查。' },
+    { type: 'tools', callIds: ['t1', 't2', 't3', 't4', 't5'] },
+    { type: 'text', text: '开始处理。' },
+    { type: 'tools', callIds: ['t6'] },
+    { type: 'reasoning', text: '再次检查' },
+    { type: 'text', text: '完成。' },
+  ];
+  eq(
+    JSON.stringify(assistant.parts),
+    JSON.stringify(expected),
+    '流中保持文字 → 工具 5 次 → 文字 → 工具的顺序',
+  );
+  await chat.approveTool('t6');
+  eq(assistant.toolCalls?.[5].status, 'running', '第二组确认按钮仍更新原工具卡');
+  eq(JSON.stringify(assistant.parts), JSON.stringify(expected), '确认与状态更新不移动任何内容');
+  const finalParts = JSON.parse(JSON.stringify(assistant.parts));
+  finalParts[5].text = '完成。补充结果。';
+  resolve({
+    text: '先检查。开始处理。完成。补充结果。',
+    reasoning: '再次检查',
+    parts: finalParts,
+    finishReason: 'stop',
+    canceled: false,
+    warnings: [],
+  });
+  await sending;
+  eq(assistant.text, '先检查。开始处理。完成。补充结果。', '最终正文补齐');
+  eq(
+    JSON.stringify(assistant.parts),
+    JSON.stringify(finalParts),
+    '最终结果同步校准时间线，不重复追加文字',
+  );
+  await sleep(650);
+  const stored = savedConversations.at(-1)!;
+  fresh();
+  seedConversations(stored);
+  const reopened = useAiChatStore();
+  await reopened.ensureLoaded();
+  const restored = reopened.activeConversation!.messages[1];
+  eq(JSON.stringify(restored.parts), JSON.stringify(finalParts), '重开后分组和先后顺序完整保留');
+  eq(restored.toolCalls?.[5].status, 'interrupted', '重开后时间线里的挂起工具仍被净化');
+  eq(
+    JSON.stringify(
+      getAiMessageParts({ text: '旧正文', reasoning: '旧思考', toolCalls: [toolCall({})] }),
+    ),
+    JSON.stringify([
+      { type: 'reasoning', text: '旧思考' },
+      { type: 'text', text: '旧正文' },
+      { type: 'tools', callIds: ['call-1'] },
+    ]),
+    '没有时间线的历史记录保持原布局',
+  );
+}
 
 console.log(`\n渲染进程桩测：${passed} 条通过，${failures.length} 条失败`);
 for (const f of failures) console.error(`  ✗ ${f}`);

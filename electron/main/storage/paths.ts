@@ -4,6 +4,7 @@
  * **后续任何需要落盘的功能都只经这里取路径**（`cachePath()` / `dataPath()`），
  * 不要再自己拼 `app.getPath(...)`：路径可被用户更改并迁移，绕过这里的代码在用户
  * 改完路径后会继续写老地方。
+ * 固定放在软件旁的 Skill 资源使用 getSoftwareDir，不随数据目录迁移。
  *
  * 两个目录的定位：
  * - **缓存目录**（可丢弃）：默认 `%TEMP%\Toolbox`。实测 `app.getPath('temp')` 就是
@@ -65,10 +66,14 @@ function defaultCacheDir(): string {
  * @returns 默认数据目录。
  */
 function defaultDataDir(): string {
-  const base = app.isPackaged
+  return path.join(getSoftwareDir(), 'data');
+}
+
+/** 固定软件目录：安装版为 exe 所在目录，便携版为原始 exe 所在目录，开发时为项目根目录。 */
+export function getSoftwareDir(): string {
+  return app.isPackaged
     ? (process.env.PORTABLE_EXECUTABLE_DIR ?? path.dirname(app.getPath('exe')))
     : app.getAppPath();
-  return path.join(base, 'data');
 }
 
 /**
@@ -209,7 +214,7 @@ export function getPathsInfo(): AppPathsInfo {
 }
 
 /** 迁移进行中时挂起状态写入的回调，由 appState 注册，避免两个模块循环引用。 */
-let writeSuspender: { suspend: () => void | Promise<void>; resume: () => void } | null = null;
+const writeSuspenders = new Set<{ suspend: () => void | Promise<void>; resume: () => void }>();
 
 /**
  * 注册「迁移期间挂起状态写入」的钩子。
@@ -219,7 +224,7 @@ export function setWriteSuspender(hooks: {
   suspend: () => void | Promise<void>;
   resume: () => void;
 }): void {
-  writeSuspender = hooks;
+  writeSuspenders.add(hooks);
 }
 
 /**
@@ -238,8 +243,8 @@ export function setWriteSuspender(hooks: {
 export async function changeDataDir(target: string, explicit = true): Promise<MigrateResult> {
   const resolved = path.resolve(target);
 
-  await writeSuspender?.suspend();
   try {
+    for (const hooks of writeSuspenders) await hooks.suspend();
     await assertUsableTarget(resolved, dataDir, 'data');
     await writeMarker(resolved, 'data');
     const moved = await moveDirContents(dataDir, resolved);
@@ -249,7 +254,7 @@ export async function changeDataDir(target: string, explicit = true): Promise<Mi
     writeStorageSettings({ dataDir: explicit ? resolved : undefined });
     return { dataDir: resolved, ...moved };
   } finally {
-    writeSuspender?.resume();
+    for (const hooks of writeSuspenders) hooks.resume();
   }
 }
 

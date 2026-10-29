@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { stat } from 'fs/promises';
 import { FFPROBE_PATH } from './binary';
 import { runFfmpegToBuffer } from './run';
+import { pluginMediaInputFlags, pluginMediaSignal } from './context';
 import type { AudioMeta, VideoMeta, VideoStreamInfo } from '../../shared/types';
 
 /**
@@ -64,17 +65,29 @@ function toStreamInfo(stream: ProbeStream): VideoStreamInfo {
  * @throws ffprobe 失败或文件无任何媒体流时抛出。
  */
 export async function probeVideo(filePath: string): Promise<VideoMeta> {
-  const args = ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', filePath];
+  const args = [
+    '-v',
+    'error',
+    '-print_format',
+    'json',
+    '-show_format',
+    '-show_streams',
+    ...pluginMediaInputFlags(),
+    filePath,
+  ];
 
   const text = await new Promise<string>((resolve, reject) => {
-    const child = spawn(FFPROBE_PATH, args, { windowsHide: true });
+    const signal = pluginMediaSignal();
+    const child = spawn(FFPROBE_PATH, args, { windowsHide: true, signal });
     let out = '';
     let err = '';
     child.stdout.on('data', (chunk: Buffer) => {
       out += chunk.toString();
+      if (signal && out.length > 256 * 1024) child.kill();
     });
     child.stderr.on('data', (chunk: Buffer) => {
       err += chunk.toString();
+      if (signal && err.length > 16000) err = err.slice(-16000);
     });
     child.on('error', reject);
     child.on('close', (code) => {

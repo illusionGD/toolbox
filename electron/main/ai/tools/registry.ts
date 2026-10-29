@@ -304,7 +304,7 @@ const READ_TOOLS: AnyToolDef[] = [
   }),
 ];
 
-/** 写盘工具：`ask` 模式逐次确认，`auto` 模式只在 `forceConfirm` 时确认。 */
+/** 写盘工具：`ask` 模式逐次确认，`auto` 模式直接执行。 */
 const WRITE_TOOLS: AnyToolDef[] = [
   defineTool({
     name: 'compress_images',
@@ -327,7 +327,6 @@ const WRITE_TOOLS: AnyToolDef[] = [
       const where = input.overwrite ? '覆盖原文件' : `输出到 ${input.outputDir}`;
       return `压缩 ${input.paths.length} 张图片${target}（${where}）`;
     },
-    forceConfirm: (input) => input.overwrite === true,
     run: async (input) => {
       const overwrite = input.overwrite === true;
       const outputDir = resolveOutputDir(input.outputDir, overwrite);
@@ -378,7 +377,6 @@ const WRITE_TOOLS: AnyToolDef[] = [
       const where = input.overwrite ? '覆盖原文件' : `输出到 ${input.outputDir}`;
       return `转码 ${basename(input.path)} → ${input.format ?? 'mp4'}${size}（${where}）`;
     },
-    forceConfirm: (input) => input.overwrite === true,
     run: async (input, ctx) => {
       const overwrite = input.overwrite === true;
       const outputDir = resolveOutputDir(input.outputDir, overwrite);
@@ -442,7 +440,6 @@ const WRITE_TOOLS: AnyToolDef[] = [
       const where = input.overwrite ? '覆盖原文件' : `输出到 ${input.outputDir}`;
       return `转码 ${basename(input.path)} → ${input.format ?? 'mp3'}（${where}）`;
     },
-    forceConfirm: (input) => input.overwrite === true,
     run: async (input, ctx) => {
       const overwrite = input.overwrite === true;
       const outputDir = resolveOutputDir(input.outputDir, overwrite);
@@ -509,8 +506,6 @@ const WRITE_TOOLS: AnyToolDef[] = [
       const rest = input.renames.length > 1 ? ` 等 ${input.renames.length} 个` : '';
       return `重命名 ${basename(first.path)} → ${first.newName}${rest}`;
     },
-    // 改名是原地改动、没有输出副本可以对照，**任何模式下都问一次**
-    forceConfirm: () => true,
     run: async (input) => {
       const result = await renameBatch(input.renames as RenamePair[]);
       if (result.conflicts.length > 0) {
@@ -548,7 +543,6 @@ const WRITE_TOOLS: AnyToolDef[] = [
       `写入 ${basename(input.path)}（${humanSize(Buffer.byteLength(input.content, 'utf-8'))}，${
         input.overwrite ? '允许覆盖' : '不覆盖'
       }）到 ${dirname(input.path)}`,
-    forceConfirm: (input) => input.overwrite === true,
     run: async (input) => {
       const result = await writeTextFile(input.path, input.content, input.overwrite === true);
       return { note: `已写入 ${humanSize(result.bytes)}`, data: result };

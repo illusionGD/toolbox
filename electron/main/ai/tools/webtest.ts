@@ -189,7 +189,6 @@ export const WEBTEST_TOOLS: AnyToolDef[] = [
   defineTool({
     name: 'webtest_patch_steps',
     kind: 'write',
-    forceConfirm: (input) => !input.dryRun,
     description:
       '按步骤 ID 修复当前用例的定位、iframe、间隔、路径或值。先读取和检查真实 DOM，再提交修复；expectedRevision 防止覆盖新修改。dryRun 默认 true，只校验并预览；false 才保存并同步工具页。禁止用删除步骤或换动作绕过失败。保存不等于验证通过，需回放检查。',
     inputSchema: z.object({
@@ -270,7 +269,6 @@ export const WEBTEST_TOOLS: AnyToolDef[] = [
   defineTool({
     name: 'webtest_import',
     kind: 'write',
-    forceConfirm: () => true,
     description:
       '导入本工具的 JSON/TS/JS 用例到当前网页测试页面，替换当前用例。仅解析数据区，不运行脚本；最大 5MB。',
     inputSchema: z.object({ path: z.string().min(1), expectedRevision: revision }),
@@ -291,7 +289,6 @@ export const WEBTEST_TOOLS: AnyToolDef[] = [
   defineTool({
     name: 'webtest_export',
     kind: 'write',
-    forceConfirm: (input) => input.overwrite,
     description:
       '将当前用例导出为 JSON/JS/TS 文件（不执行脚本），复用工具页导出逻辑。默认不覆盖，返回路径和字节数，不将整份脚本塞入上下文。',
     inputSchema: z.object({
@@ -314,7 +311,6 @@ export const WEBTEST_TOOLS: AnyToolDef[] = [
   defineTool({
     name: 'webtest_record',
     kind: 'write',
-    forceConfirm: () => true,
     description:
       '按用户提供的 URL 启动网页操作录制，替换当前用例并打开独立浏览器，用户操作后调用 webtest_stop。可选录视频，写缓存 webtest/videos；不自动操作页面。',
     inputSchema: z.object({

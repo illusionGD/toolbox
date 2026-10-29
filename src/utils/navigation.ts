@@ -1,5 +1,7 @@
 import { NAV_ITEMS } from '@/constants/navigation';
 import type { NavItem } from '@/types/navigation';
+import { reactive } from 'vue';
+import type { PluginRecord } from '@shared/plugins/types';
 
 /** 扁平化后的工具信息。 */
 export interface FlatTool {
@@ -42,7 +44,25 @@ function flatten(
 }
 
 /** key → 工具信息 的全量映射。 */
-export const TOOL_MAP: ReadonlyMap<string, FlatTool> = flatten(NAV_ITEMS, null, new Map());
+const toolMap = reactive(flatten(NAV_ITEMS, null, new Map()));
+export const TOOL_MAP: ReadonlyMap<string, FlatTool> = toolMap;
+
+/** @param records 已安装插件快照；更新首页与使用记录的导航元数据。 */
+export function updatePluginNavigation(records: PluginRecord[]): void {
+  for (const key of toolMap.keys()) if (key.startsWith('plugin:')) toolMap.delete(key);
+  for (const record of records.filter((r) => r.enabled)) {
+    for (const page of record.manifest.contributes.pages) {
+      const key = `plugin:${record.manifest.id}:${page.id}`;
+      toolMap.set(key, {
+        key,
+        label: page.title,
+        path: `/plugins/${record.manifest.id}/${page.id}`,
+        category: page.category,
+        categoryLabel: NAV_ITEMS.find((item) => item.key === page.category)?.label ?? '插件',
+      });
+    }
+  }
+}
 
 /**
  * 按 key 获取工具信息。

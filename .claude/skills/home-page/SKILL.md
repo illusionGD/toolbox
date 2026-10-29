@@ -32,6 +32,7 @@ description: Toolbox 首页——推荐工具(tab)、最近使用、使用统计
 
 - 新增推荐工具：改 `RECOMMEND_GROUPS`（key 用 NavItem.key，保证跳转与埋点一致）。
 - 统计分类来自 `getTool(key).category`，即工具在 NAV_ITEMS 的顶级分组——加新工具自动归类，无需改统计逻辑。
+- 最近使用先通过响应式 `getTool(key)?.path` 过滤当前可打开的工具，再排序并取前 10 条；卸载/停用插件或移除页面贡献后自动隐藏，启用并加载导航后自动恢复。只过滤展示，不删除持久化历史记录。
 - 记录时间戳由调用方传入（`recordUsage(key, Date.now())`），符合"工具函数/ store 不内联取时间"的可测性约定。
 
 ## 边界 / 后续

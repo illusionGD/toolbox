@@ -179,6 +179,7 @@
 
     <!-- AI 配置另立组件：本视图已经不短，且 AI 那块本身还会继续长 -->
     <AiSettingsCard />
+    <AiSkillManager class="settings__section" />
 
     <!-- 桌宠同理：它自己也会继续长（spine / live2d / 桌宠 AI 都还没接） -->
     <PetSettingsCard />
@@ -202,6 +203,7 @@ import {
 import type { AppPathsInfo, DirUsage, StorageDirKind } from '@shared/types';
 import type { AppCloseAction } from '@shared/appWindow';
 import AiSettingsCard from '@/components/ai/AiSettingsCard.vue';
+import AiSkillManager from '@/components/ai/AiSkillManager.vue';
 import PetSettingsCard from '@/components/pet/PetSettingsCard.vue';
 import { useThemeStore } from '@/stores/theme';
 import { useCloseAction } from '@/composables/useCloseAction';

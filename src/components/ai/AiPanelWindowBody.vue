@@ -54,6 +54,9 @@
         <n-button size="tiny" quaternary title="AI 配置" @click="goSettings">
           <n-icon :size="15" :component="SettingsOutline" />
         </n-button>
+        <n-button size="tiny" quaternary title="管理 Skills" @click="skillsShow = true">
+          <n-icon :size="15" :component="BookOutline" />
+        </n-button>
         <n-button
           size="tiny"
           :quaternary="!alwaysOnTop"
@@ -96,6 +99,9 @@
     </div>
 
     <AiComposer />
+    <n-modal v-model:show="skillsShow" style="width: min(760px, 94vw)">
+      <AiSkillManager />
+    </n-modal>
   </div>
 </template>
 
@@ -111,9 +117,10 @@
  * 自己的 `window.close()`，而 ─ 最小化没有对应的 DOM API，只能走专用的 `ai:minimizeWindow`。
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { NAlert, NButton, NIcon, NInput, NSelect, useMessage } from 'naive-ui';
+import { NAlert, NButton, NIcon, NInput, NModal, NSelect, useMessage } from 'naive-ui';
 import {
   AddOutline,
+  BookOutline,
   CloseOutline,
   CreateOutline,
   PinOutline,
@@ -124,6 +131,7 @@ import {
 import type { AiWindowState } from '@shared/types';
 import AiMessageItem from './AiMessageItem.vue';
 import AiComposer from './AiComposer.vue';
+import AiSkillManager from './AiSkillManager.vue';
 import { useAiChatStore } from '@/stores/aiChat';
 import { useAiConfigStore } from '@/stores/aiConfig';
 import { usePetStore } from '@/stores/pet';
@@ -134,6 +142,7 @@ import { formatRelativeTime } from '@/utils/format';
 
 // #region setup
 const chat = useAiChatStore();
+const skillsShow = ref(false);
 const configStore = useAiConfigStore();
 const petStore = usePetStore();
 

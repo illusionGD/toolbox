@@ -11,21 +11,29 @@
  * - **取消有专门的 `abort` 分片且 `fullStream` 正常结束**，不抛错，所以取消不是错误路径。
  */
 import { readFile } from 'node:fs/promises';
-import { stepCountIs, streamText, type ModelMessage } from 'ai';
+import { stepCountIs, streamText, type ModelMessage, type PrepareStepFunction } from 'ai';
 import { supportsVision } from '../../shared/ai';
+import { appendAiMessageDelta, upsertAiToolCall } from '../../shared/aiMessage';
 import type {
   AiChatRequest,
   AiChatResult,
   AiConfig,
+  AiMessagePart,
   AiSendMessage,
   AiStreamEvent,
   AiTestResult,
+  AiToolCall,
   AiUsage,
 } from '../../shared/types';
 import { createModel } from './provider';
 import { describeAiError, isAbortError } from './errors';
-import { buildSystemPrompt, TEST_CONNECTION_PROMPT } from '../../shared/prompts';
+import {
+  buildSystemPrompt,
+  TEST_CONNECTION_PROMPT,
+  TOOL_LIMIT_SUMMARY_PROMPT,
+} from '../../shared/prompts';
 import { buildTools, denyPending, killTasks, trackTask } from './tools';
+import { buildSkillContext } from './skills/context';
 
 /**
  * 重试次数。**选定值不是实测值**：SDK 默认 2 次重试（共 3 次请求），撞上 429 时用户
@@ -35,14 +43,12 @@ import { buildTools, denyPending, killTasks, trackTask } from './tools';
 const MAX_RETRIES = 1;
 
 /**
- * 一次请求里允许的最大步数（**选定值**）。
+ * 一次请求允许 100 轮工具执行，另留一轮只生成总结（选定值）。
  *
- * 多步循环的每一步都是一次**真实请求**（上一步的工具结果拼进上下文再发一遍），所以这
- * 个数直接乘在 token 账单上。8 步足够走完「探测 → 处理 → 汇报」，再多就该让用户看一眼
- * 再说下一句了。撞上限时实测 `finishReason === 'tool-calls'` 且 `text === ''`——**助手
- * 气泡会是空白的**，所以那时必须补一条告警说明发生了什么。
+ * 复杂任务不再在第 8 轮截断；保留较宽的兜底，避免模型异常循环。
+ * 每轮都会携带已有工具结果请求模型，用户仍可随时取消。
  */
-const MAX_TOOL_STEPS = 8;
+const MAX_TOOL_STEPS = 100;
 
 /** 进行中的请求，按 requestId 索引，供取消用。 */
 const running = new Map<string, AbortController>();
@@ -230,8 +236,12 @@ export async function runChat(
     onEvent({ requestId: request.requestId, type: 'error', message: text });
   };
 
-  let text = '';
-  let reasoning = '';
+  const content = {
+    text: '',
+    reasoning: '',
+    parts: [] as AiMessagePart[],
+    toolCalls: [] as AiToolCall[],
+  };
   let finishReason = 'unknown';
 
   try {
@@ -242,17 +252,47 @@ export async function runChat(
       warn,
     );
 
-    const tools = buildTools({
-      signal: controller.signal,
-      requestId: request.requestId,
-      mode: request.toolMode,
-      // 工具事件搭现成的流式通道走：渲染进程那边一处订阅就全收了
-      emit: (toolCall) =>
-        onEvent({ requestId: request.requestId, type: 'tool', toolCall: { ...toolCall } }),
-      trackTask: (taskId) => trackTask(request.requestId, taskId),
-    });
+    // execute 可能早于 fullStream 消费文字。首次状态必须等对应 tool-call 到达，
+    // 否则界面会把工具放在模型已经说出的文字之前。
+    const announcedCalls = new Set<string>();
+    const queuedCalls = new Map<string, AiToolCall[]>();
+    const emitTool = (toolCall: AiToolCall): void => {
+      upsertAiToolCall(content, toolCall);
+      onEvent({ requestId: request.requestId, type: 'tool', toolCall: { ...toolCall } });
+    };
+    const skillContext = await buildSkillContext(request.toolMode !== 'off');
+    for (const warning of skillContext.warnings) warn(warning);
+    const tools = buildTools(
+      {
+        signal: controller.signal,
+        requestId: request.requestId,
+        mode: request.toolMode,
+        // 工具事件搭现成的流式通道走：渲染进程那边一处订阅就全收了
+        emit: (toolCall) => {
+          if (announcedCalls.has(toolCall.callId)) emitTool(toolCall);
+          else {
+            const queued = queuedCalls.get(toolCall.callId) ?? [];
+            queued.push({ ...toolCall });
+            queuedCalls.set(toolCall.callId, queued);
+          }
+        },
+        trackTask: (taskId) => trackTask(request.requestId, taskId),
+      },
+      skillContext.tools,
+    );
 
-    const systemPrompt = buildSystemPrompt(config.systemPrompt);
+    const systemPrompt = buildSystemPrompt(
+      [config.systemPrompt, skillContext.prompt].filter(Boolean).join('\n\n'),
+    );
+    const prepareToolStep: PrepareStepFunction = ({ stepNumber, messages: stepMessages }) => {
+      if (stepNumber < MAX_TOOL_STEPS) return undefined;
+      warn(`已执行 ${MAX_TOOL_STEPS} 轮工具调用，正在整理已有结果`);
+      return {
+        toolChoice: 'none',
+        activeTools: [],
+        messages: [...stepMessages, { role: 'user', content: TOOL_LIMIT_SUMMARY_PROMPT }],
+      };
+    };
 
     const result = streamText({
       model,
@@ -267,19 +307,28 @@ export async function runChat(
       // 默认实现会往 console 打，还会走 SDK 自带的 warning 通道；接过来自己处理
       onError: ({ error }) => report(error),
       // toolMode 为 off 时 buildTools 回 undefined，展开后等于压根没传 tools
-      ...(tools ? { tools, stopWhen: stepCountIs(MAX_TOOL_STEPS) } : {}),
+      ...(tools
+        ? { tools, stopWhen: stepCountIs(MAX_TOOL_STEPS + 1), prepareStep: prepareToolStep }
+        : {}),
     });
 
     for await (const part of result.fullStream) {
       switch (part.type) {
         case 'text-delta':
-          text += part.text;
+          appendAiMessageDelta(content, 'text', part.text);
           onEvent({ requestId: request.requestId, type: 'text', delta: part.text });
           break;
         case 'reasoning-delta':
-          reasoning += part.text;
+          appendAiMessageDelta(content, 'reasoning', part.text);
           onEvent({ requestId: request.requestId, type: 'reasoning', delta: part.text });
           break;
+        case 'tool-call': {
+          const callId = `${request.requestId}:${part.toolCallId}`;
+          announcedCalls.add(callId);
+          for (const call of queuedCalls.get(callId) ?? []) emitTool(call);
+          queuedCalls.delete(callId);
+          break;
+        }
         case 'error':
           report(part.error);
           break;
@@ -291,7 +340,7 @@ export async function runChat(
           // start / start-step / text-start / text-end / finish-step / finish 等
           // 对界面没有信息量，忽略。
           // 工具那几种（tool-input-start / tool-input-delta / tool-input-end /
-          // tool-call / tool-result / tool-error）同样落在这里：界面要的东西已经由
+          // tool-result / tool-error）同样落在这里：界面要的东西已经由
           // 我们自己在 execute 包装里 emit 过了，而且那份记录更好用——SDK 的
           // tool-error 里 error 字段序列化出来是 `{}`（实测）。
           break;
@@ -305,23 +354,37 @@ export async function runChat(
       warn(describeWarning(warning));
     }
 
-    const usage = await safeUsage(result.usage);
+    const usage = await safeUsage(result.totalUsage);
     const finish = await Promise.resolve(result.finishReason).catch(() =>
       canceled ? 'abort' : 'error',
     );
     finishReason = finish;
 
-    // 撞上步数上限时**没有收尾文字**（实测 finishReason 'tool-calls' + text 空），
-    // 不说一句的话用户看到的就是一个空气泡加几张工具卡片
+    // tool-calls 也可能是无效工具调用导致提前结束，不能一概误报达到轮数上限。
     if (finish === 'tool-calls' && !canceled) {
-      warn(`已达到工具调用步数上限（${MAX_TOOL_STEPS} 步），模型还没来得及给出结论`);
+      warn('模型在工具调用后结束了回复，尚未给出最终结论');
     }
 
     if (errorMessage && !canceled) throw new Error(errorMessage);
-    return { text, reasoning, usage, finishReason, canceled, warnings };
+    return {
+      text: content.text,
+      reasoning: content.reasoning,
+      parts: content.parts,
+      usage,
+      finishReason,
+      canceled,
+      warnings,
+    };
   } catch (error) {
     if (isAbortError(error)) {
-      return { text, reasoning, finishReason: 'abort', canceled: true, warnings };
+      return {
+        text: content.text,
+        reasoning: content.reasoning,
+        parts: content.parts,
+        finishReason: 'abort',
+        canceled: true,
+        warnings,
+      };
     }
     // 已经推过 error 分片的，就原样把同一句话抛出去；否则先归一化
     throw error instanceof Error && errorMessage === error.message

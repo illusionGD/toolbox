@@ -1,6 +1,7 @@
 import { resolve } from 'path';
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import vue from '@vitejs/plugin-vue';
+import { PLUGIN_CHANNELS } from './electron/shared/channels';
 
 export default defineConfig({
   main: {
@@ -14,11 +15,13 @@ export default defineConfig({
     },
   },
   preload: {
+    define: { __PLUGIN_CHANNELS__: JSON.stringify(PLUGIN_CHANNELS) },
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'electron/preload/index.ts'),
+          plugin: resolve(__dirname, 'electron/preload/plugin.ts'),
         },
       },
     },

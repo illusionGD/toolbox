@@ -1,12 +1,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import type {
-  AiConversation,
-  AiImageRef,
-  AiMessage,
-  AiSendMessage,
-  AiToolCall,
-} from '@shared/types';
+import type { AiConversation, AiImageRef, AiMessage, AiSendMessage } from '@shared/types';
+import { appendAiMessageDelta, upsertAiToolCall } from '@shared/aiMessage';
 import {
   cancelAiApi,
   chatAiApi,
@@ -105,22 +100,6 @@ export const useAiChatStore = defineStore('aiChat', () => {
     return conversation?.messages.find((m) => m.id === target.messageId);
   }
 
-  /**
-   * 把一条工具记录写进消息。
-   *
-   * **按 callId upsert，不能无脑 push**：同一个 callId 会来多次（pending → running →
-   * done），push 的话一次调用会画出三张卡片。主进程每次发的都是完整记录，所以整条替换
-   * 就是最新状态。
-   * @param message 目标助手消息。
-   * @param call 工具记录。
-   */
-  function upsertToolCall(message: AiMessage, call: AiToolCall): void {
-    const list = message.toolCalls ?? (message.toolCalls = []);
-    const index = list.findIndex((item) => item.callId === call.callId);
-    if (index >= 0) list.splice(index, 1, call);
-    else list.push(call);
-  }
-
   /** 流式分片订阅的取消函数（只订一次）。 */
   let unsubscribe: (() => void) | null = null;
 
@@ -130,14 +109,13 @@ export const useAiChatStore = defineStore('aiChat', () => {
     unsubscribe = onAiStream((event) => {
       const message = findTarget(event.requestId);
       if (!message) return;
-      if (event.type === 'text') message.text += event.delta ?? '';
-      else if (event.type === 'reasoning')
-        message.reasoning = (message.reasoning ?? '') + event.delta;
+      if (event.type === 'text' || event.type === 'reasoning')
+        appendAiMessageDelta(message, event.type, event.delta ?? '');
       else if (event.type === 'warning') {
         message.warnings = [...(message.warnings ?? []), event.message ?? ''];
       } else if (event.type === 'error') message.error = event.message ?? '请求失败';
       else if (event.type === 'abort') message.canceled = true;
-      else if (event.type === 'tool' && event.toolCall) upsertToolCall(message, event.toolCall);
+      else if (event.type === 'tool' && event.toolCall) upsertAiToolCall(message, event.toolCall);
     });
   }
 
@@ -268,6 +246,7 @@ export const useAiChatStore = defineStore('aiChat', () => {
       id: crypto.randomUUID(),
       role: 'assistant',
       text: '',
+      parts: [],
       createdAt: now,
     };
     conversation.messages.push(userMessage, assistantMessage);
@@ -306,10 +285,26 @@ export const useAiChatStore = defineStore('aiChat', () => {
         // 策略跟着请求走，主进程不去读 app-state（读了就是两份状态，必然漂移）
         toolMode: configStore.toolApproval,
       });
-      // 以最终结果为准（分片累积理论上一致，但断流补齐时以它为准更稳）
-      if (result.text) assistantMessage.text = result.text;
-      if (result.reasoning) assistantMessage.reasoning = result.reasoning;
-      if (result.canceled) assistantMessage.canceled = true;
+      // 从 store 取响应式消息，避免直接修改 push 前的原始对象而不触发界面更新。
+      const target = findTarget(requestId);
+      if (target) {
+        if (result.parts) {
+          target.parts = result.parts;
+          target.text = result.text;
+          target.reasoning = result.reasoning;
+        } else {
+          // 兼容没有 parts 的结果：只补流中遗漏的后缀，不重复已有内容。
+          if (result.text.startsWith(target.text))
+            appendAiMessageDelta(target, 'text', result.text.slice(target.text.length));
+          if (result.reasoning.startsWith(target.reasoning ?? ''))
+            appendAiMessageDelta(
+              target,
+              'reasoning',
+              result.reasoning.slice(target.reasoning?.length ?? 0),
+            );
+        }
+        if (result.canceled) target.canceled = true;
+      }
     } catch (error) {
       // 错误多数已由 error 分片写进消息，这里兜住分片没来的情况
       if (!assistantMessage.error) {

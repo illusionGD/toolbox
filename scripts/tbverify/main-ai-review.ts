@@ -9,11 +9,13 @@
  * 于是 `describeWarning` 匹配错字段这件事一路漏到了界面上。
  */
 import { mkdtempSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join as joinPath } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import type { ToolSet } from 'ai';
 import { AI_CHANNELS } from '../../electron/shared/channels';
+import { TOOL_LIMIT_SUMMARY_PROMPT } from '../../electron/shared/prompts';
 import {
   AI_PANEL_MIN_HEIGHT,
   AI_PANEL_MIN_WIDTH,
@@ -78,6 +80,7 @@ import { registerAiIpc } from '../../electron/main/ipc/ai';
 import type {
   AiChatRequest,
   AiConfig,
+  AiStreamEvent,
   AiToolCall,
   AiToolMode,
   IpcResponse,
@@ -584,9 +587,8 @@ async function callTool(
     { execute?: (input: unknown, options: unknown) => Promise<unknown> } | undefined;
   if (!entry?.execute) throw new Error(`工具未注册：${name}`);
   try {
-    // 第二个参数实测有 toolCallId / messages / abortSignal / experimental_context，
-    // 我们的包装一个都不用，给足前两个就行
-    return await entry.execute(input, { toolCallId: 'tc-1', messages: [] });
+    // 与 SDK 一致，每次调用有独立 id，工具确认与流顺序都按它关联。
+    return await entry.execute(input, { toolCallId: randomUUID(), messages: [] });
   } catch (error) {
     return { threw: error instanceof Error ? error.message : String(error) };
   }
@@ -654,7 +656,7 @@ eq(
   );
 
   const ask = probeTools('ask');
-  eq(Object.keys(ask.tools ?? {}).length, 24, 'ask 模式下 24 个工具都注册给了 SDK');
+  eq(Object.keys(ask.tools ?? {}).length, 27, 'ask 模式注册 24 个原工具与 3 个插件开发工具');
   eq(
     names.every((n) => typeof (ask.tools?.[n] as { execute?: unknown })?.execute === 'function'),
     true,
@@ -667,18 +669,30 @@ eq(
   );
 }
 
-// 只读工具：不确认、直接跑；返回值必须封顶
+// 网页测试写操作遵循统一模式：询问时可拒绝，自动时执行并返回底层结果。
 {
-  const probe = probeTools('auto', 'req-webtest-deny');
+  const probe = probeTools('ask', 'req-webtest-deny');
   const pending = callTool(probe.tools, 'webtest_patch_steps', {
     expectedRevision: 0,
     dryRun: false,
     patches: [{ id: 'target', selector: 'button' }],
   });
   await new Promise((resolve) => setTimeout(resolve, 20));
-  eq(probe.emitted[0]?.status, 'pending', 'AI 保存步骤修复在 auto 模式仍确认');
+  eq(probe.emitted[0]?.status, 'pending', 'AI 保存步骤修复在 ask 模式确认');
   replyConfirm(probe.emitted[0]?.callId ?? '', false);
   eq(((await pending) as { denied?: boolean }).denied, true, '拒绝步骤修复不进入共享会话');
+  const automatic = probeTools('auto', 'req-webtest-auto');
+  const attempted = await settledWithin(
+    callTool(automatic.tools, 'webtest_patch_steps', {
+      expectedRevision: 0,
+      dryRun: false,
+      patches: [{ id: 'target', selector: 'button' }],
+    }),
+  );
+  eq(attempted !== 'timeout', true, 'auto 网页测试写操作不等待确认');
+  eq(automatic.emitted[0]?.status, 'running', 'auto 网页测试写操作直接开始');
+  eq(typeof (attempted as { error?: string }).error, 'string', 'auto 仍保留共享会话未初始化的校验');
+  denyPending('req-webtest-auto');
   const missing = (await callTool(probeTools('ask').tools, 'webtest_status', {})) as {
     error?: string;
   };
@@ -800,12 +814,12 @@ eq(
   eq(
     probe.emitted.some((c) => c.status === 'pending'),
     false,
-    'auto 模式下不覆盖原文件就不问',
+    'auto 模式下写文件不问',
   );
   eq(probe.emitted[0]?.status, 'running', 'auto 模式下第一条事件就是 running');
 }
 
-// auto + overwrite:true：**仍然确认**（不可逆的数据丢失，而模型是会被文件内容带偏的）
+// auto + overwrite:true：直接执行，确认策略不再由工具自行覆盖。
 {
   const probe = probeTools('auto', 'req-auto-overwrite');
   const target = joinPath(toolDir, 'auto.txt');
@@ -814,15 +828,19 @@ eq(
     content: '覆盖内容',
     overwrite: true,
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  eq(probe.emitted[0]?.status, 'pending', 'auto 模式 + overwrite 仍然发 pending');
-
-  eq(replyConfirm(probe.emitted[0]?.callId ?? '', true), true, '这条确认真的在等回答');
-  await settledWithin(pendingCall);
-  eq(await readFile(target, 'utf-8'), '覆盖内容', '确认之后才覆盖');
+  eq((await settledWithin(pendingCall)) !== 'timeout', true, 'auto 覆盖无需确认即可完成');
+  eq(probe.emitted[0]?.status, 'running', 'auto 覆盖直接发 running');
+  eq(
+    probe.emitted.some((call) => call.status === 'pending'),
+    false,
+    'auto 覆盖没有待确认卡片',
+  );
+  eq(replyConfirm(probe.emitted[0]?.callId ?? '', true), false, 'auto 覆盖没有遗留确认请求');
+  denyPending('req-auto-overwrite');
+  eq(await readFile(target, 'utf-8'), '覆盖内容', 'auto 覆盖实际写入磁盘');
 }
 
-// rename_files 的 forceConfirm 恒为 true：改名是原地改动，任何模式都问
+// 自动重命名实际执行，不等待确认。
 {
   const probe = probeTools('auto', 'req-auto-rename');
   const source = joinPath(toolDir, 'rename-me.txt');
@@ -830,17 +848,66 @@ eq(
   const pendingCall = callTool(probe.tools, 'rename_files', {
     renames: [{ path: source, newName: 'renamed.txt' }],
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  eq(probe.emitted[0]?.status, 'pending', 'auto 模式下 rename_files 也要确认');
-  replyConfirm(probe.emitted[0]?.callId ?? '', false);
-  await settledWithin(pendingCall);
+  eq((await settledWithin(pendingCall)) !== 'timeout', true, 'auto 重命名无需确认即可完成');
+  eq(probe.emitted[0]?.status, 'running', 'auto 重命名直接开始');
+  eq(lastCall(probe)?.status, 'done', 'auto 重命名完成');
+  denyPending('req-auto-rename');
   eq(
     await readFile(source, 'utf-8').then(
       () => true,
       () => false,
     ),
-    true,
-    '拒绝改名后原文件还在原处',
+    false,
+    'auto 重命名后原路径不再存在',
+  );
+  eq(
+    await readFile(joinPath(toolDir, 'renamed.txt'), 'utf-8').catch(() => null),
+    'x',
+    '重命名后内容保留在新路径',
+  );
+}
+
+// 插件草稿同样使用询问/自动策略；自动不能绕过包校验。
+{
+  const automatic = probeTools('auto', 'req-draft-auto');
+  const result = await settledWithin(
+    callTool(automatic.tools, 'plugin_create_draft', { files: {} }),
+  );
+  eq(result !== 'timeout', true, 'auto 插件草稿不等待确认');
+  eq(automatic.emitted[0]?.status, 'running', 'auto 插件草稿直接执行');
+  eq(typeof (result as { error?: string }).error, 'string', '非法草稿仍被校验拒绝');
+  denyPending('req-draft-auto');
+  const ask = probeTools('ask', 'req-draft-ask');
+  const pending = callTool(ask.tools, 'plugin_create_draft', { files: {} });
+  eq(ask.emitted[0]?.status, 'pending', 'ask 插件草稿等待确认');
+  replyConfirm(ask.emitted[0]?.callId ?? '', false);
+  eq(((await settledWithin(pending)) as { denied?: boolean }).denied, true, '拒绝后不创建草稿');
+}
+
+// 已取消的自动请求不得产生写入。
+{
+  const target = joinPath(toolDir, 'auto-canceled.txt');
+  const controller = new AbortController();
+  controller.abort();
+  const tools = buildTools({
+    requestId: 'req-auto-canceled',
+    mode: 'auto',
+    signal: controller.signal,
+    emit: () => {},
+    trackTask: () => {},
+  });
+  const result = await callTool(tools, 'write_text_file', {
+    path: target,
+    content: 'must not write',
+  });
+  eq(typeof (result as { error?: string }).error, 'string', 'auto 仍检查请求取消状态');
+  eq(
+    await readFile(target, 'utf-8').then(
+      () => true,
+      () => false,
+    ),
+    false,
+    '已取消的 auto 写命令不落盘',
   );
 }
 
@@ -1688,6 +1755,117 @@ eq(
 }
 
 /* ---------------------------------- 汇总 ---------------------------------- */
+
+/* ---------------- 多轮真实 SDK 流：顺序、100 轮上限与总结 ---------------- */
+
+/** 注入协议响应，工具执行和 SDK 的多轮调度仍用生产代码。 */
+async function toolStreamScenario(rounds: number, callsPerRound = 1, cancelOnPending = false) {
+  const source = joinPath(toolDir, 'stream-source.txt');
+  writeFileSync(source, '用于汇总的工具结果');
+  const events: AiStreamEvent[] = [];
+  const bodies: { tools?: unknown[]; messages: { role: string; content: unknown }[] }[] = [];
+  const requestId = randomUUID();
+  const fetchImpl: typeof globalThis.fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body));
+    bodies.push(body);
+    const round = bodies.length;
+    const usingTools = round <= rounds;
+    const deltas = [{ content: usingTools ? `第${round}轮说明。` : '最终总结。' } as object];
+    if (usingTools) {
+      deltas.push({
+        tool_calls: Array.from({ length: callsPerRound }, (_, index) => ({
+          index,
+          id: `round-${round}-call-${index}`,
+          type: 'function',
+          function: {
+            name: cancelOnPending ? 'write_text_file' : 'read_text_file',
+            arguments: JSON.stringify(
+              cancelOnPending
+                ? { path: joinPath(toolDir, 'must-not-write.txt'), content: '不该写入' }
+                : { path: source },
+            ),
+          },
+        })),
+      });
+    }
+    const chunks = deltas.map((delta) => ({ choices: [{ index: 0, delta, finish_reason: null }] }));
+    chunks.push({
+      choices: [{ index: 0, delta: {}, finish_reason: usingTools ? 'tool_calls' : 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+    } as (typeof chunks)[number]);
+    return new Response(
+      chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n',
+      {
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    );
+  };
+  const result = await runChat(
+    {
+      requestId,
+      config: refusedConfig,
+      messages: [{ role: 'user', text: '处理并总结' }],
+      toolMode: 'ask',
+    },
+    'sk-test',
+    (event) => {
+      events.push(event);
+      if (cancelOnPending && event.toolCall?.status === 'pending') cancelChat(requestId);
+    },
+    fetchImpl,
+  );
+  return { result, bodies, events };
+}
+
+{
+  const { result, events } = await toolStreamScenario(2, 5);
+  deepEq(
+    result.parts?.map((part) => part.type),
+    ['text', 'tools', 'text', 'tools', 'text'],
+    'SDK 多轮文字与工具按实际顺序分组',
+  );
+  deepEq(
+    result.parts?.filter((part) => part.type === 'tools').map((part) => part.callIds.length),
+    [5, 5],
+    '每轮 5 次调用合并成一个工具组',
+  );
+  eq(events[0]?.type, 'text', '同步到达的工具执行事件不会抢在首段文字之前');
+  eq(
+    events.filter((event) => event.toolCall?.status === 'done').length,
+    10,
+    '10 次真实读工具全部完成',
+  );
+  eq(result.warnings.length, 0, '正常结束不显示上限警告');
+  eq(result.usage?.totalTokens, 36, '用量合计所有轮次');
+}
+
+{
+  const { result, bodies } = await toolStreamScenario(100);
+  eq(bodies.length, 101, '完整执行 100 轮工具后额外请求一次总结');
+  eq(Boolean(bodies[99]?.tools?.length), true, '第 100 轮仍可调用工具');
+  eq(Boolean(bodies[100]?.tools?.length), false, '总结轮不下发任何工具');
+  eq(
+    bodies[100]?.messages.at(-1)?.content,
+    TOOL_LIMIT_SUMMARY_PROMPT,
+    '总结轮使用集中维护的交接提示词',
+  );
+  eq(result.text.endsWith('最终总结。'), true, '达到上限后保留最终结论');
+  eq(result.parts?.filter((part) => part.type === 'tools').length, 100, '100 轮工具记录全部保留');
+  eq(result.warnings.length, 1, '到达上限只提示一次正在整理结果');
+  eq(result.finishReason, 'stop', '总结正常结束');
+}
+
+{
+  const { result, bodies, events } = await toolStreamScenario(1, 1, true);
+  eq(result.canceled, true, '等待确认时取消仍能结束多轮流');
+  eq(bodies.length, 1, '取消后不自动发总结请求');
+  eq(
+    events.some((event) => event.toolCall?.status === 'pending'),
+    true,
+    '确认卡能够及时推到界面，未被顺序队列卡住',
+  );
+  eq(result.text, '第1轮说明。', '取消保留已经生成的文字');
+}
 
 console.log(`\n主进程桩测：${passed} 条通过，${failures.length} 条失败`);
 for (const f of failures) console.error(`  ✗ ${f}`);

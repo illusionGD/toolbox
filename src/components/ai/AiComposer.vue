@@ -31,6 +31,7 @@
       />
       <n-select
         class="ai-composer__approval"
+        :title="approvalHint"
         size="tiny"
         :value="configStore.toolApproval"
         :options="APPROVAL_OPTIONS"
@@ -110,6 +111,16 @@ const APPROVAL_OPTIONS: { label: string; value: AiToolMode }[] = [
 // #region setup
 const chat = useAiChatStore();
 const configStore = useAiConfigStore();
+
+/** 当前模式作用于下一次发送的请求，写工具的执行范围在选择处说明。 */
+const approvalHint = computed(
+  () =>
+    ({
+      ask: '询问：读取直接执行，写入和运行 Python 脚本前逐次确认。对下次发送生效。',
+      auto: '自动：直接执行读取、写入、覆盖、重命名和 Skill Python 脚本。对下次发送生效。',
+      off: '关闭：不向 AI 提供工具。对下次发送生效。',
+    })[configStore.toolApproval],
+);
 
 /** 输入框内容。 */
 const draft = ref('');

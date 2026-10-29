@@ -29,6 +29,7 @@ import {
   setPanelTop,
 } from '../ai/panelWindow';
 import { handle } from './helper';
+import { registerSkillsIpc } from './skills';
 
 /**
  * 取该配置的 key，没配就抛一句能直接看的中文。
@@ -59,6 +60,7 @@ function streamTo(sender: WebContents): (event: AiStreamEvent) => void {
 
 /** 注册 AI 相关 IPC。 */
 export function registerAiIpc(): void {
+  registerSkillsIpc();
   handle<boolean>(AI_CHANNELS.openWindow, async () => {
     await openPanelWindow();
     return true;

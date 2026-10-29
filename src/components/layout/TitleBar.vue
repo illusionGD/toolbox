@@ -156,8 +156,8 @@ onUnmounted(() => {
 /** 结果条数上限。 */
 const MAX_RESULTS = 8;
 
-/** 可搜索的叶子工具（有 path 的，顶层分类无 path 被排除），模块级算一次。 */
-const candidates: FlatTool[] = [...TOOL_MAP.values()].filter((t) => !!t.path);
+/** 插件启用/停用时同步刷新可搜索的工具。 */
+const candidates = computed<FlatTool[]>(() => [...TOOL_MAP.values()].filter((t) => !!t.path));
 
 const searchKeyword = ref('');
 const focused = ref(false);
@@ -167,7 +167,7 @@ const activeIndex = ref(0);
 const results = computed<FlatTool[]>(() => {
   const kw = searchKeyword.value.trim().toLowerCase();
   if (!kw) return [];
-  return candidates
+  return candidates.value
     .filter((t) => t.label.toLowerCase().includes(kw) || t.categoryLabel.toLowerCase().includes(kw))
     .slice(0, MAX_RESULTS);
 });

@@ -1,0 +1,29 @@
+body {
+  max-width: 760px;
+  padding: 24px;
+  margin: auto;
+  font-family: system-ui, sans-serif;
+}
+label {
+  display: block;
+  margin-top: 16px;
+}
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100px;
+  margin: 8px 0;
+  font: inherit;
+}
+button {
+  background: var(--tb-color-primary, #7c3aed);
+  color: white;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

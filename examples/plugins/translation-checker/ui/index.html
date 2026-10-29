@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>翻译检查</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script type="module" src="./index.js"></script>
+  </head>
+  <body>
+    <h1>翻译检查</h1>
+    <p>输入两份语言 JSON，检查目标语言缺少的键。</p>
+    <label for="source">基准语言</label>
+    <textarea id="source">{"hello":"你好","bye":"再见"}</textarea>
+    <label for="target">目标语言</label>
+    <textarea id="target">{"hello":"Hello"}</textarea>
+    <button id="run">检查</button>
+    <pre id="result" role="status"></pre>
+  </body>
+</html>

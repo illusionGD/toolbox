@@ -1687,7 +1687,7 @@ export interface AiConfig {
  * - `off`：**压根不下发 `tools`**。省掉每次请求十几个工具声明的 token，也绕开部分兼容
  *   端点对 `tools` 直接 400 的问题。
  * - `ask`（默认）：只读工具直接跑，写盘工具逐次确认。
- * - `auto`：写盘工具也直接跑，**但覆盖原文件仍然要确认**（见 {@link AiToolCall}）。
+ * - `auto`：读写工具均直接执行，不等待工具确认；底层参数与能力授权照常校验。
  */
 export type AiToolMode = 'off' | 'ask' | 'auto';
 
@@ -1820,6 +1820,12 @@ export interface AiToolCall {
   elapsed?: number;
 }
 
+/** 按流式事件顺序保存的内容；工具状态仍由 toolCalls 按 callId 统一维护。 */
+export type AiMessagePart =
+  | { type: 'text'; text: string }
+  | { type: 'reasoning'; text: string }
+  | { type: 'tools'; callIds: string[] };
+
 /** 一条对话消息（既是界面模型也是落盘模型）。 */
 export interface AiMessage {
   /** 消息 id。 */
@@ -1842,6 +1848,8 @@ export interface AiMessage {
   warnings?: string[];
   /** 这条助手消息里发生过的工具调用，按发生顺序。 */
   toolCalls?: AiToolCall[];
+  /** 文字、思考与工具组的显示顺序。旧记录没有此字段时按原布局展示。 */
+  parts?: AiMessagePart[];
 }
 
 /** 下发给主进程的单条消息（不带 id / 时间等界面字段）。 */
@@ -1903,6 +1911,8 @@ export interface AiChatResult {
   text: string;
   /** 完整推理过程。 */
   reasoning: string;
+  /** 完整的内容顺序，用于流结束时校准渲染进程。 */
+  parts?: AiMessagePart[];
   /** 用量；取不到时为 undefined（取消时一定取不到）。 */
   usage?: AiUsage;
   /** 结束原因（stop / length / error / …）。 */

@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { electronAPI } from '@electron-toolkit/preload';
+import { pluginsApi } from './plugins';
+import { skillsApi } from './skills';
 import {
   AI_CHANNELS,
   APP_CHANNELS,
@@ -114,6 +116,7 @@ import type {
 
 /** 暴露给渲染进程的自定义 API。 */
 const api = {
+  plugins: pluginsApi,
   /** 文件对比只读操作及进度。 */
   fileDiff: {
     compare: (options: FileDiffOptions): Promise<IpcResponse<FileDiffResult>> =>
@@ -753,6 +756,7 @@ const api = {
    * {@link AiKeyStatus}（是否存在 + 掩码），渲染进程永远拿不到原文。
    */
   ai: {
+    skills: skillsApi,
     /**
      * 打开 AI 对话窗口（没开就建，开着就聚焦）。
      *

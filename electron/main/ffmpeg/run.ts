@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { FFMPEG_PATH } from './binary';
+import { pluginMediaArgs, pluginMediaSignal } from './context';
 
 /**
  * ffmpeg 子进程的统一执行入口。
@@ -102,7 +103,10 @@ export function runFfmpeg(args: string[], options: RunOptions = {}): Promise<Run
     }
 
     const full = ['-hide_banner', '-nostdin', '-y', '-nostats', '-progress', 'pipe:1', ...args];
-    const child = spawn(FFMPEG_PATH, full, { windowsHide: true });
+    const child = spawn(FFMPEG_PATH, pluginMediaArgs(full), {
+      windowsHide: true,
+      signal: pluginMediaSignal(),
+    });
     const task = { child, canceled: false };
     if (options.taskId) runningTasks.set(options.taskId, task);
 
@@ -212,8 +216,9 @@ export function cancelFfmpeg(taskId: string): boolean {
  */
 export function runFfmpegCollectStderr(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(FFMPEG_PATH, ['-hide_banner', '-nostdin', '-y', ...args], {
+    const child = spawn(FFMPEG_PATH, pluginMediaArgs(['-hide_banner', '-nostdin', '-y', ...args]), {
       windowsHide: true,
+      signal: pluginMediaSignal(),
     });
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => {
@@ -247,8 +252,9 @@ export function runFfmpegCollectStderr(args: string[]): Promise<string> {
  */
 export function runFfmpegToBuffer(args: string[]): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn(FFMPEG_PATH, ['-hide_banner', '-nostdin', '-y', ...args], {
+    const child = spawn(FFMPEG_PATH, pluginMediaArgs(['-hide_banner', '-nostdin', '-y', ...args]), {
       windowsHide: true,
+      signal: pluginMediaSignal(),
     });
     const chunks: Buffer[] = [];
     let stderrTail: string[] = [];

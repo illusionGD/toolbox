@@ -242,8 +242,8 @@ export const useAiConfigStore = defineStore('aiConfig', () => {
 
   /**
    * 设置工具审批策略（全局一份，跟着下一次请求下发）。
-   * @param value `'off'` 不下发工具 / `'ask'` 写盘前逐次确认 / `'auto'` 直接跑（覆盖
-   * 原文件仍然会问，那条在主进程里强制，不受这里影响）。
+   * @param value `'off'` 不下发工具 / `'ask'` 写盘前逐次确认 / `'auto'` 直接执行读写工具，
+   * 包括覆盖与重命名；底层参数校验与能力授权继续生效。
    */
   function setToolApproval(value: AiToolMode): void {
     toolApproval.value = value;

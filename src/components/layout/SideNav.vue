@@ -33,15 +33,22 @@ import type { NavItem } from '@/types/navigation';
 import { useAiConfigStore } from '@/stores/aiConfig';
 import { useEntitlement } from '@/composables/useEntitlement';
 import { openAiWindowApi } from '@/services/ai';
+import { usePluginsStore } from '@/stores/plugins';
 
 // #region setup
 const route = useRoute();
 const router = useRouter();
 const aiConfig = useAiConfigStore();
 const { can } = useEntitlement();
+const plugins = usePluginsStore();
+plugins.init();
 
 /** 当前激活的菜单 key，取自路由 meta.navKey。 */
-const activeKey = computed(() => (route.meta.navKey as string | undefined) ?? '');
+const activeKey = computed(() =>
+  route.name === 'plugin-page'
+    ? `plugin:${route.params.pluginId}:${route.params.pageId}`
+    : ((route.meta.navKey as string | undefined) ?? ''),
+);
 
 /** 渲染图标为 naive-ui n-menu 需要的函数形式。 */
 function renderIcon(icon?: Component) {
@@ -59,7 +66,26 @@ function toMenuOption(item: NavItem): MenuOption {
   };
 }
 
-const menuOptions = computed<MenuOption[]>(() => NAV_ITEMS.map(toMenuOption));
+const menuOptions = computed<MenuOption[]>(() => {
+  const items = NAV_ITEMS.map((item) => ({
+    ...item,
+    children: item.children ? [...item.children] : undefined,
+  }));
+  for (const record of plugins.records.filter((r) => r.enabled)) {
+    for (const page of record.manifest.contributes.pages) {
+      const category =
+        items.find((item) => item.key === page.category) ??
+        items.find((item) => item.key === 'more')!;
+      category.children ??= [];
+      category.children.push({
+        key: `plugin:${record.manifest.id}:${page.id}`,
+        label: page.title,
+        path: `/plugins/${record.manifest.id}/${page.id}`,
+      });
+    }
+  }
+  return items.map(toMenuOption);
+});
 
 /** 「还没配置」那个小圆点。样式写成内联的：`h()` 出来的节点由 n-menu 渲染，拿不到本组件的 scoped 属性。 */
 const DOT_STYLE = {
@@ -118,6 +144,11 @@ keyToPath.set('about', '/about');
  * @param key 选中的菜单 key。
  */
 function handleSelect(key: string): void {
+  if (key.startsWith('plugin:')) {
+    const [, id, page] = key.split(':');
+    void router.push(`/plugins/${id}/${page}`);
+    return;
+  }
   // AI 助手不是一个页面：它开的是独立的无边框窗口（能拖到第二块屏、能置顶），
   // 所以这一项在 keyToPath 里没有条目，也不该走 router
   if (key === 'ai') {
