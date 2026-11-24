@@ -64,6 +64,17 @@
             </div>
             <div class="ai-msg__tool-summary">{{ call.summary }}</div>
             <div v-if="call.result" class="ai-msg__tool-result">{{ call.result }}</div>
+            <div v-if="call.files?.length" class="ai-msg__tool-files">
+              <n-button
+                v-for="path in call.files"
+                :key="path"
+                size="tiny"
+                :title="`在文件夹中显示 ${path}`"
+                @click="void showInFolderApi(path)"
+              >
+                {{ basenameOf(path) }}
+              </n-button>
+            </div>
             <!-- 只有 pending 才有按钮：其余状态那边的 promise 已经落定，点了没人接 -->
             <div v-if="call.status === 'pending'" class="ai-msg__tool-actions">
               <n-button size="tiny" type="primary" @click="chat.approveTool(call.callId)"
@@ -96,7 +107,9 @@ import type { AiMessage, AiToolCall } from '@shared/types';
 import { getAiMessageParts } from '@shared/aiMessage';
 import AiMarkdown from './AiMarkdown.vue';
 import { formatBytes } from '@/utils/format';
+import { basenameOf } from '@/utils/path';
 import { useAiAvatar } from '@/composables/useAiAvatar';
+import { showInFolderApi } from '@/services/file';
 import { useAiChatStore } from '@/stores/aiChat';
 
 interface Props {
@@ -338,8 +351,10 @@ function formatElapsed(ms: number): string {
     word-break: break-word;
   }
 
-  &__tool-actions {
+  &__tool-actions,
+  &__tool-files {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--tb-space-2);
     margin-top: var(--tb-space-2);
   }

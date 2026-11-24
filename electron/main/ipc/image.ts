@@ -1594,10 +1594,15 @@ type QrLevel = 'L' | 'M' | 'Q' | 'H';
  * svg 走 `QRCode.toString` 写文本。文件名由渲染进程定好（模板/序号/手改），
  * 这里只做重名去重与落盘。单条失败（内容超容量等）计入 failed，不中断整批。
  * @param options 生成选项。
+ * @param overwrite 已存在的文件是否可覆盖；AI 调用时使用独占写入并追加序号。
  * @returns 成功路径与失败数。
  */
-async function generateQrCodes(options: QrGenerateOptions): Promise<QrGenerateResult> {
+export async function generateQrCodes(
+  options: QrGenerateOptions,
+  overwrite = true,
+): Promise<QrGenerateResult> {
   const { items, size, margin, level, dark, light, format, outputDir } = options;
+  const extension = format === 'svg' || format === 'jpg' ? format : 'png';
   const outputPaths: string[] = [];
   let failed = 0;
   const usedNames = new Map<string, number>();
@@ -1612,10 +1617,9 @@ async function generateQrCodes(options: QrGenerateOptions): Promise<QrGenerateRe
       continue;
     }
     // 重名去重：同名追加序号
-    let name = item.name || 'qr';
-    const count = usedNames.get(name) ?? 0;
+    const name = item.name || 'qr';
+    let count = usedNames.get(name) ?? 0;
     usedNames.set(name, count + 1);
-    if (count > 0) name = `${name}_${count}`;
 
     try {
       const common = {
@@ -1623,21 +1627,29 @@ async function generateQrCodes(options: QrGenerateOptions): Promise<QrGenerateRe
         errorCorrectionLevel: level as QrLevel,
         color: { dark, light },
       };
+      let data: string | Buffer;
       if (format === 'svg') {
-        const svg = await QRCode.toString(item.text, { type: 'svg', ...common });
-        const outputPath = join(outputDir, `${name}.svg`);
-        await writeFile(outputPath, svg, 'utf8');
-        outputPaths.push(outputPath);
+        data = await QRCode.toString(item.text, { type: 'svg', ...common });
       } else {
         const png = await QRCode.toBuffer(item.text, { type: 'png', width: size, ...common });
-        const outputPath = join(outputDir, `${name}.${format === 'jpg' ? 'jpg' : 'png'}`);
         // qrcode 只出 png，jpg 用 sharp 转码（flatten 到 light 底色，jpg 无透明）
-        const buffer =
+        data =
           format === 'jpg'
             ? await sharp(png).flatten({ background: light }).jpeg().toBuffer()
             : png;
-        await writeFile(outputPath, buffer);
-        outputPaths.push(outputPath);
+      }
+      for (;;) {
+        const fileName = count === 0 ? name : `${name}_${count}`;
+        const outputPath = join(outputDir, `${fileName}.${extension}`);
+        try {
+          await writeFile(outputPath, data, { flag: overwrite ? 'w' : 'wx' });
+          outputPaths.push(outputPath);
+          usedNames.set(name, count + 1);
+          break;
+        } catch (error) {
+          if (overwrite || (error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+          count += 1;
+        }
       }
     } catch {
       // 内容超出二维码容量、颜色非法等：计失败，继续下一条
@@ -1672,7 +1684,7 @@ async function generateQrPreview(options: QrPreviewOptions): Promise<string> {
  * @param filePath 图片路径。
  * @returns 解析结果。
  */
-async function decodeQrCode(filePath: string): Promise<QrDecodeResult> {
+export async function decodeQrCode(filePath: string): Promise<QrDecodeResult> {
   const name = basename(filePath);
   try {
     const input = await readFile(filePath);

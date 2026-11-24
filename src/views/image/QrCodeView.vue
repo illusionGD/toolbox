@@ -319,7 +319,8 @@ import {
   FolderOpenOutline,
   QrCodeOutline,
 } from '@vicons/ionicons5';
-import type { PickedFile, QrErrorLevel, QrGenerateItem, QrOutputFormat } from '@shared/types';
+import type { PickedFile, QrGenerateItem } from '@shared/types';
+import { QR_GENERATE_DEFAULTS } from '@shared/qrCode';
 import type { QrDecodeItem } from './types';
 import ToolPageLayout from '@/components/layout/ToolPageLayout.vue';
 import StatusTag from '@/components/common/StatusTag.vue';
@@ -390,12 +391,7 @@ const previewContent = computed(() => genItems.value[previewIndex.value]?.text ?
 
 const { config: genConfig } = useToolConfig('image-qrcode-gen', {
   nameTemplate: 'qr_{n}',
-  size: 320,
-  margin: 2,
-  level: 'M' as QrErrorLevel,
-  dark: '#000000',
-  light: '#ffffff',
-  format: 'png' as QrOutputFormat,
+  ...QR_GENERATE_DEFAULTS,
   validate: 'none' as 'none' | 'url' | 'regex',
   validateRegex: '',
   outputDir: '',

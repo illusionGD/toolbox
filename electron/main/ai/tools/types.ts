@@ -36,6 +36,8 @@ export interface ToolOutput {
   failed?: boolean;
   /** 一行中文结果摘要。 */
   note: string;
+  /** 本次生成的本地文件，供会话卡片定位。 */
+  files?: string[];
   /** 回给模型的结构。**必须精简且封顶**，见 registry.ts 顶部的两条硬规则。 */
   data: unknown;
 }

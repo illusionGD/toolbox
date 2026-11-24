@@ -1814,6 +1814,8 @@ export interface AiToolCall {
   status: 'pending' | 'running' | 'done' | 'denied' | 'error' | 'interrupted';
   /** 结果摘要（成功一行、失败是原因）。**不放全量结果**，会话文件不该被它撑大。 */
   result?: string;
+  /** 本次生成的本地文件路径，可从对话定位。 */
+  files?: string[];
   /** 开始时间戳（毫秒）。 */
   startedAt: number;
   /** 耗时毫秒（跑完才有）。 */

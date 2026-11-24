@@ -45,6 +45,7 @@ import { probeExcel } from '../../ipc/excel';
 import { defineTool, type AnyToolDef } from './types';
 import { untrackTask } from './tasks';
 import { WEBTEST_TOOLS } from './webtest';
+import { QR_CODE_TOOLS } from './qrCode';
 
 /** `list_files` 回给模型的条目上限。 */
 const MAX_LIST_ENTRIES = 200;
@@ -551,4 +552,4 @@ const WRITE_TOOLS: AnyToolDef[] = [
 ];
 
 /** 全部工具。 */
-export const TOOLS: AnyToolDef[] = [...READ_TOOLS, ...WRITE_TOOLS, ...WEBTEST_TOOLS];
+export const TOOLS: AnyToolDef[] = [...READ_TOOLS, ...WRITE_TOOLS, ...QR_CODE_TOOLS, ...WEBTEST_TOOLS];

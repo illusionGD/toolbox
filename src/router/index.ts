@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router';
 import type { Component } from 'vue';
+import type { ToolPageKey } from '@shared/toolPages';
 import { NAV_ITEMS } from '@/constants/navigation';
 import type { NavItem } from '@/types/navigation';
 import { getTool } from '@/utils/navigation';
@@ -31,7 +32,7 @@ import PluginPageView from '@/views/plugins/PluginPageView.vue';
  * 已实现工具的 key → 页面组件映射。
  * 未在此表中的工具走 PlaceholderView（功能开发中）。
  */
-const TOOL_COMPONENTS: Record<string, Component> = {
+const TOOL_COMPONENTS: Partial<Record<string, Component>> = {
   plugins: PluginManagerView,
   'image-compress': ImageCompressView,
   'image-crop': ImageCropView,
@@ -50,7 +51,7 @@ const TOOL_COMPONENTS: Record<string, Component> = {
   'media-video': VideoView,
   'media-audio': AudioView,
   'dev-webtest': WebTestView,
-};
+} satisfies Record<ToolPageKey, Component>;
 
 /**
  * 从导航树递归收集所有带 path 的叶子项，生成路由。

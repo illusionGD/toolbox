@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join as joinPath } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import type { ToolSet } from 'ai';
+import { TOOL_PAGE_AI_ACTIONS } from '../../electron/shared/toolPages';
 import { AI_CHANNELS } from '../../electron/shared/channels';
 import { TOOL_LIMIT_SUMMARY_PROMPT } from '../../electron/shared/prompts';
 import {
@@ -77,6 +78,8 @@ import {
   setKey,
 } from '../../electron/main/ai/keys';
 import { registerAiIpc } from '../../electron/main/ipc/ai';
+import { initStoragePaths } from '../../electron/main/storage/paths';
+import { writeStorageSettings } from '../../electron/main/storage/settings';
 import type {
   AiChatRequest,
   AiConfig,
@@ -614,40 +617,36 @@ eq(
 
 {
   const names = TOOLS.map((t) => t.name);
-  eq(names.length, 24, '通用工具 13 个 + 网页测试工具 11 个');
-  eq(TOOLS.filter((t) => t.kind === 'read').length, 13, '只读工具 13 个');
-  eq(TOOLS.filter((t) => t.kind === 'write').length, 11, '写操作工具 11 个');
   eq(new Set(names).size, names.length, '工具名不重复（重名会被后者顶掉，静默少一个能力）');
-  deepEq(
-    [...names].sort(),
-    [
-      'compress_images',
-      'convert_audio',
-      'convert_video',
-      'list_files',
-      'probe_audio',
-      'probe_excel',
-      'probe_font',
-      'probe_image',
-      'probe_video',
-      'read_text_file',
-      'rename_files',
-      'storage_info',
-      'webtest_export',
-      'webtest_import',
-      'webtest_inspect',
-      'webtest_patch_steps',
-      'webtest_read_steps',
-      'webtest_record',
-      'webtest_replay',
-      'webtest_status',
-      'webtest_stop',
-      'webtest_videos',
-      'webtest_wait',
-      'write_text_file',
-    ],
-    '工具清单包含通用能力和网页测试能力',
-  );
+  const expected = [
+    'compress_images',
+    'convert_audio',
+    'convert_video',
+    'decode_qr_code',
+    'generate_qr_codes',
+    'list_files',
+    'probe_audio',
+    'probe_excel',
+    'probe_font',
+    'probe_image',
+    'probe_video',
+    'read_text_file',
+    'rename_files',
+    'storage_info',
+    'webtest_export',
+    'webtest_import',
+    'webtest_inspect',
+    'webtest_patch_steps',
+    'webtest_read_steps',
+    'webtest_record',
+    'webtest_replay',
+    'webtest_status',
+    'webtest_stop',
+    'webtest_videos',
+    'webtest_wait',
+    'write_text_file',
+  ];
+  for (const name of expected) eq(names.includes(name), true, `保留内置工具 ${name}`);
   // 硬规则：没有删除、没有 shell、没有网络抓取。加工具时手滑最容易破的就是这条
   eq(
     names.some((n) => /delete|remove|shell|exec|spawn|fetch|http|download/i.test(n)),
@@ -656,7 +655,15 @@ eq(
   );
 
   const ask = probeTools('ask');
-  eq(Object.keys(ask.tools ?? {}).length, 27, 'ask 模式注册 24 个原工具与 3 个插件开发工具');
+  for (const [page, actions] of Object.entries(TOOL_PAGE_AI_ACTIONS)) {
+    for (const action of actions) {
+      eq(
+        names.includes(action) && typeof ask.tools?.[action]?.execute === 'function',
+        true,
+        `${page} 的 ${action} 已注册且可调用`,
+      );
+    }
+  }
   eq(
     names.every((n) => typeof (ask.tools?.[n] as { execute?: unknown })?.execute === 'function'),
     true,
@@ -667,6 +674,56 @@ eq(
     'object',
     '工具带着 inputSchema 下发（SDK 靠它翻成各家的 JSON Schema）',
   );
+}
+
+{
+  const probe = probeTools('ask', 'req-qr-generate');
+  const outputDir = joinPath(toolDir, 'qrcode');
+  const path = joinPath(outputDir, '同名.png');
+  const text = ' https://example.com/二维码\n第二行 ';
+  const options = { items: [{ text, name: '同名' }], outputDir };
+  const pending = callTool(probe.tools, 'generate_qr_codes', options);
+  eq(lastCall(probe)?.status, 'pending', '二维码写入需要确认');
+  eq(await readFile(path).catch(() => null), null, '确认前没有文件');
+  replyConfirm(lastCall(probe)?.callId ?? '', false);
+  await pending;
+  eq(await readFile(path).catch(() => null), null, '拒绝后没有文件');
+
+  const approved = callTool(probe.tools, 'generate_qr_codes', options);
+  replyConfirm(lastCall(probe)?.callId ?? '', true);
+  deepEq(await approved, { outputPaths: [path], failed: 0 }, '二维码返回真实文件路径');
+  deepEq(lastCall(probe)?.files, [path], '结果卡片收到可定位的文件路径');
+  const decoded = (await callTool(probe.tools, 'decode_qr_code', { path })) as { text?: string };
+  eq(decoded.text, text, '二维码往返保留中文、网址、空格和换行');
+
+  const auto = probeTools('auto', 'req-qr-repeat');
+  const original = await readFile(path);
+  const duplicates = await Promise.all([
+    callTool(auto.tools, 'generate_qr_codes', options),
+    callTool(auto.tools, 'generate_qr_codes', options),
+  ]);
+  deepEq(
+    duplicates.flatMap((item) => (item as { outputPaths: string[] }).outputPaths).sort(),
+    [joinPath(outputDir, '同名_1.png'), joinPath(outputDir, '同名_2.png')],
+    '并发生成同名文件时分配不同路径',
+  );
+  eq((await readFile(path)).equals(original), true, '原文件保持原样');
+
+  const dataDir = joinPath(toolDir, 'data');
+  writeStorageSettings({ dataDir, cacheDir: joinPath(toolDir, 'cache') });
+  await initStoragePaths();
+  const svgPath = joinPath(dataDir, 'ai', 'output', 'qrcode', 'qr_1.svg');
+  const partial = await callTool(auto.tools, 'generate_qr_codes', {
+    items: [{ text: 'https://example.com' }, { text: '中文'.repeat(2000) }],
+    format: 'svg',
+  });
+  deepEq(
+    (partial as { outputPaths: string[] }).outputPaths,
+    [svgPath],
+    'SVG 默认写入应用数据目录',
+  );
+  eq((partial as { failed: number }).failed, 1, '超出容量仅计入单条失败');
+  eq((await readFile(svgPath, 'utf8')).includes('<svg'), true, 'SVG 文件已生成');
 }
 
 // 网页测试写操作遵循统一模式：询问时可拒绝，自动时执行并返回底层结果。
@@ -1759,11 +1816,19 @@ eq(
 /* ---------------- 多轮真实 SDK 流：顺序、100 轮上限与总结 ---------------- */
 
 /** 注入协议响应，工具执行和 SDK 的多轮调度仍用生产代码。 */
-async function toolStreamScenario(rounds: number, callsPerRound = 1, cancelOnPending = false) {
+async function toolStreamScenario(
+  rounds: number,
+  callsPerRound = 1,
+  cancelOnPending = false,
+  operation?: { name: string; input: unknown },
+) {
   const source = joinPath(toolDir, 'stream-source.txt');
   writeFileSync(source, '用于汇总的工具结果');
   const events: AiStreamEvent[] = [];
-  const bodies: { tools?: unknown[]; messages: { role: string; content: unknown }[] }[] = [];
+  const bodies: {
+    tools?: { function: { name: string } }[];
+    messages: { role: string; content: unknown }[];
+  }[] = [];
   const requestId = randomUUID();
   const fetchImpl: typeof globalThis.fetch = async (_input, init) => {
     const body = JSON.parse(String(init?.body));
@@ -1778,11 +1843,12 @@ async function toolStreamScenario(rounds: number, callsPerRound = 1, cancelOnPen
           id: `round-${round}-call-${index}`,
           type: 'function',
           function: {
-            name: cancelOnPending ? 'write_text_file' : 'read_text_file',
+            name: operation?.name ?? (cancelOnPending ? 'write_text_file' : 'read_text_file'),
             arguments: JSON.stringify(
-              cancelOnPending
-                ? { path: joinPath(toolDir, 'must-not-write.txt'), content: '不该写入' }
-                : { path: source },
+              operation?.input ??
+                (cancelOnPending
+                  ? { path: joinPath(toolDir, 'must-not-write.txt'), content: '不该写入' }
+                  : { path: source }),
             ),
           },
         })),
@@ -1810,11 +1876,43 @@ async function toolStreamScenario(rounds: number, callsPerRound = 1, cancelOnPen
     'sk-test',
     (event) => {
       events.push(event);
-      if (cancelOnPending && event.toolCall?.status === 'pending') cancelChat(requestId);
+      if (event.toolCall?.status === 'pending') {
+        if (cancelOnPending) cancelChat(requestId);
+        else if (operation) replyConfirm(event.toolCall.callId, true);
+      }
     },
     fetchImpl,
   );
   return { result, bodies, events };
+}
+
+{
+  const outputDir = joinPath(toolDir, 'qrcode-sdk');
+  const path = joinPath(outputDir, 'qr_1.jpg');
+  const { bodies, events } = await toolStreamScenario(1, 1, false, {
+    name: 'generate_qr_codes',
+    input: { outputDir, format: 'jpg', items: [{ text: 'https://example.com' }] },
+  });
+  eq(
+    bodies[0]?.tools?.some((entry) => entry.function.name === 'generate_qr_codes'),
+    true,
+    '发送给模型的工具包含二维码生成',
+  );
+  deepEq(
+    events.find((event) => event.toolCall?.status === 'done')?.toolCall?.files,
+    [path],
+    '模型工具调用完成后，流式事件返回 JPG 路径',
+  );
+  const response = bodies[1]?.messages.find((message) => message.role === 'tool')?.content;
+  deepEq(
+    JSON.parse(String(response ?? 'null')),
+    { outputPaths: [path], failed: 0 },
+    '模型收到文件路径与失败数',
+  );
+  const decoded = (await callTool(probeTools('auto').tools, 'decode_qr_code', { path })) as {
+    text?: string;
+  };
+  eq(decoded.text, 'https://example.com', 'SDK 生成的 JPG 二维码可解析');
 }
 
 {

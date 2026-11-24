@@ -70,6 +70,7 @@ async function runTool(
       ...base,
       status: output.failed ? 'error' : 'done',
       result: output.note,
+      ...(output.files?.length ? { files: output.files } : {}),
       elapsed: Date.now() - startedAt,
     });
     // 只回 data：note 是界面文案，混进上下文只会让模型跟着复读
